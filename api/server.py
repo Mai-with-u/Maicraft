@@ -52,6 +52,7 @@ class MaicraftAPIServer:
             self.app.add_middleware(
                 CORSMiddleware,
                 allow_origins=self.config.cors.allow_origins,
+                allow_origin_regex=self.config.cors.allow_origin_regex,
                 allow_credentials=self.config.cors.allow_credentials,
                 allow_methods=self.config.cors.allow_methods,
                 allow_headers=self.config.cors.allow_headers,

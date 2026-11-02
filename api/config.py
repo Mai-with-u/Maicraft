@@ -23,12 +23,15 @@ class CORSConfig:
     enabled: bool = True
     allow_origins: List[str] = None
     allow_credentials: bool = True
+    allow_origin_regex: str = None
     allow_methods: List[str] = None
     allow_headers: List[str] = None
 
     def __post_init__(self):
         if self.allow_origins is None:
-            self.allow_origins = ["*"]
+            self.allow_origins = []
+        if self.allow_origin_regex is None:
+            self.allow_origin_regex = r"https?://(localhost|127\.0\.0\.1)(:\d+)?"
         if self.allow_methods is None:
             self.allow_methods = ["*"]
         if self.allow_headers is None:
@@ -89,7 +92,6 @@ def create_api_config() -> APIConfig:
         ),
         cors=CORSConfig(
             enabled=True,
-            allow_origins=["*"],  # 生产环境请限制域名
             allow_credentials=True,
             allow_methods=["*"],
             allow_headers=["*"]
