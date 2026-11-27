@@ -1,18 +1,29 @@
+"""配置模型与配置文件加载：不存在就从模板创建，模板更新时升级旧配置文件。"""
+
 import os
 import shutil
 import tomllib as tomli
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from packaging import version
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from maicraft.utils.logger import get_logger
 
-MARICRAFT_VERSION = "0.4.0"
+
+class InnerConfig(BaseModel):
+    """配置文件格式版本，只用来和模板比较"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    version: str = Field(default="0.3.0", description="配置格式的版本，只用来和模板比较")
 
 
 class LoggingConfig(BaseModel):
     """Logging配置模型"""
+
+    model_config = ConfigDict(extra="forbid")
 
     level: str = Field(default="INFO", description="日志级别")
     enable_json: bool = Field(default=False, description="是否启用JSON Lines格式文件输出（控制台始终为彩色格式）")
@@ -24,147 +35,82 @@ class LoggingConfig(BaseModel):
     max_recent_logs: int = Field(default=1000, ge=100, le=10000, description="内存中保留的最近日志条数")
 
 
-class ApiConfig(BaseModel):
-    """API服务器配置模型"""
-
-    host: str = Field(default="0.0.0.0", description="API服务器监听地址")
-    port: int = Field(default=20914, ge=1024, le=65535, description="API服务器监听端口")
-    enable_cors: bool = Field(default=True, description="是否启用CORS跨域支持")
-    log_level: str = Field(default="warning", description="API服务器日志级别")
-
-
-class BotConfig(BaseModel):
-    player_name: str = Field(default="Mai", description="玩家名称")
-    bot_name: str = Field(default="麦麦", description="机器人名称")
-
-
-class GameConfig(BaseModel):
-    goal: str = Field(default="以合适的步骤，建立营地，挖到16个钻石，并存储", description="游戏目标")
-
-
 class LLMConfig(BaseModel):
     """LLM配置模型"""
 
-    model: str = Field(default="gpt-4o-mini", description="LLM模型名称")
-    api_key: str = Field(default=None, description="API密钥")
-    base_url: Optional[str] = Field(default=None, description="API基础URL")
-    temperature: float = Field(default=0.2, ge=0.0, le=2.0, description="温度参数")
-    max_tokens: int = Field(default=1024, ge=100, le=8000, description="最大token数")
-
-    @field_validator("temperature")
-    @classmethod
-    def validate_temperature(cls, v):
-        """验证温度参数"""
-        if not 0.0 <= v <= 2.0:
-            raise ValueError("温度参数必须在0.0到2.0之间")
-        return v
-
-
-class LLMConfigFast(BaseModel):
-    """LLM配置模型"""
+    model_config = ConfigDict(extra="forbid")
 
     model: str = Field(default="gpt-4o-mini", description="LLM模型名称")
-    api_key: str = Field(default=None, description="API密钥")
-    base_url: Optional[str] = Field(default=None, description="API基础URL")
+    api_key: str = Field(default="", description="API密钥")
+    base_url: str = Field(default="", description="API基础URL")
     temperature: float = Field(default=0.2, ge=0.0, le=2.0, description="温度参数")
-    max_tokens: int = Field(default=1024, ge=100, le=8000, description="最大token数")
+    max_tokens: int = Field(default=4096, ge=100, le=32000, description="最大token数")
+    supports_vision: bool = Field(
+        default=False,
+        description="模型能不能看图；false 时 mod 发来的画面只把旁边的文字给模型",
+    )
+    request_timeout_s: float = Field(default=120.0, gt=0.0, description="单次模型请求的超时秒数")
 
 
-class Visual(BaseModel):
-    """视觉模型配置模型"""
+class ModConfig(BaseModel):
+    """MaiCraftMod 连接配置模型"""
 
-    enable: bool = Field(default=False, description="是否启用视觉模型")
+    model_config = ConfigDict(extra="forbid")
 
-
-class VLMConfig(BaseModel):
-    """VLM配置模型"""
-
-    model: str = Field(default="gpt-4o-mini", description="VLM模型名称")
-    api_key: str = Field(default=None, description="API密钥")
-    base_url: Optional[str] = Field(default=None, description="API基础URL")
-    temperature: float = Field(default=0.2, ge=0.0, le=2.0, description="温度参数")
-    max_tokens: int = Field(default=1024, ge=100, le=8000, description="最大token数")
+    url: str = Field(default="http://127.0.0.1:8766/mcp", description="mod 的 MCP 端点地址")
+    events_wait_ms: int = Field(default=25000, ge=1000, le=55000, description="事件长轮询的单次等待毫秒数")
 
 
-class ThreatDetectionConfig(BaseModel):
-    """威胁检测配置模型"""
+class AgentConfig(BaseModel):
+    """agent 行为配置模型"""
 
-    threat_detection_range: float = Field(default=16.0, ge=1.0, le=64.0, description="威胁生物检测范围（方块距离）")
-    enable_threat_detection: bool = Field(default=True, description="是否启用威胁生物检测")
+    model_config = ConfigDict(extra="forbid")
+
+    max_steps_per_turn: int = Field(default=30, ge=1, le=200, description="一轮对话里最多执行的动作步数")
+    idle_replan_minutes: int = Field(
+        default=10, ge=0, le=1440, description="空闲多少分钟后主动叫醒模型；0 表示不主动叫醒"
+    )
+    max_empty_turns: int = Field(default=3, ge=1, le=20, description="连续多少轮没有实际动作后停下")
+    long_term_goal: str = Field(default="", description="长期目标，原样放进提示词")
+    keep_recent_results: int = Field(default=6, ge=1, le=30, description="提示词里保留最近几条动作结果")
 
 
-class EventHandlersConfig(BaseModel):
-    """事件处理器配置模型"""
+class ChatConfig(BaseModel):
+    """聊天相关配置模型"""
 
-    pass  # 暂时为空，将来可以添加真正的事件处理器配置
+    model_config = ConfigDict(extra="forbid")
+
+    mention_names: list[str] = Field(default_factory=list, description="除角色名之外还接受哪些称呼")
+    batch_window_ms: int = Field(default=2000, ge=200, le=10000, description="把相邻消息合并处理的等待毫秒数")
+
+
+class MaigoConfig(BaseModel):
+    """Maigo 对接配置模型"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=False, description="是否启用 Maigo 对接")
+    url: str = Field(default="http://127.0.0.1:8768", description="Maigo 服务地址")
+    branch_id: str = Field(default="maicraft", description="在 Maigo 里使用的分支标识")
 
 
 class MaicraftConfig(BaseModel):
-    """Maicraft插件配置模型"""
+    """Maicraft 配置模型"""
 
+    model_config = ConfigDict(extra="forbid")
+
+    inner: InnerConfig = Field(default_factory=InnerConfig, description="配置格式版本")
     logging: LoggingConfig = Field(default_factory=LoggingConfig, description="Logging配置")
-    api: ApiConfig = Field(default_factory=ApiConfig, description="API服务器配置")
     llm: LLMConfig = Field(default_factory=LLMConfig, description="LLM配置")
-    llm_fast: LLMConfigFast = Field(default_factory=LLMConfigFast, description="LLM快速配置")
-    visual: Visual = Field(default_factory=Visual, description="视觉模型配置")
-    vlm: VLMConfig = Field(default_factory=VLMConfig, description="VLM配置")
-    bot: BotConfig = Field(default_factory=BotConfig, description="Bot配置")
-    game: GameConfig = Field(default_factory=GameConfig, description="Game配置")
-    event_handlers: EventHandlersConfig = Field(default_factory=EventHandlersConfig, description="事件处理器配置")
-    threat_detection: ThreatDetectionConfig = Field(default_factory=ThreatDetectionConfig, description="威胁检测配置")
-
-    @classmethod
-    def from_dict(cls, config_data: Dict[str, Any]) -> "MaicraftConfig":
-        """从字典创建配置对象
-
-        Args:
-            config_data: 配置字典数据
-
-        Returns:
-            MaicraftConfig: 配置对象实例
-        """
-        # 使用 Pydantic 的 model_validate 方法（Pydantic v2）
-        # 如果使用 Pydantic v1，可以替换为 parse_obj
-        try:
-            return cls.model_validate(config_data)
-        except AttributeError:
-            # 兼容 Pydantic v1
-            return cls.parse_obj(config_data)
+    mod: ModConfig = Field(default_factory=ModConfig, description="mod连接配置")
+    agent: AgentConfig = Field(default_factory=AgentConfig, description="agent行为配置")
+    chat: ChatConfig = Field(default_factory=ChatConfig, description="聊天配置")
+    maigo: MaigoConfig = Field(default_factory=MaigoConfig, description="Maigo对接配置")
 
 
-def load_config_from_dict(config_data: Dict[str, Any]) -> MaicraftConfig:
-    """从字典加载配置"""
-    logger = get_logger("ConfigLoader")
-    try:
-        config = MaicraftConfig.from_dict(config_data)
-        logger.info("[配置加载] 配置加载成功")
-        return config
-    except Exception as e:
-        logger.error(f"[配置加载] 配置加载失败: {e}")
-        raise
-
-
-def create_default_config() -> MaicraftConfig:
-    """创建默认配置"""
-    return MaicraftConfig()
-
-
-def _load_config_from_toml(toml_path: str) -> Dict[str, Any]:
-    with open(toml_path, "rb") as f:
-        data = tomli.load(f)
-    return data
-
-
-def _get_template_path() -> str:
-    """获取模板文件路径"""
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    template_path = os.path.join(base_dir, "config-template.toml")
-
-    if not os.path.exists(template_path):
-        # 兼容从项目根目录执行
-        template_path = os.path.join(os.getcwd(), "config-template.toml")
-
-    return template_path
+def template_path() -> Path:
+    """运行目录下的 config-template.toml"""
+    return Path.cwd() / "config-template.toml"
 
 
 def _get_version_from_toml(toml_path: str) -> Optional[str]:
@@ -198,13 +144,13 @@ def _parse_toml_with_comments(file_path: str) -> tuple[Dict[str, Any], str]:
     return data, content
 
 
-def _update_config_from_template(config_path: str, template_path: str) -> None:
+def _update_config_from_template(config_path: str, template_path_str: str) -> None:
     """从模板更新配置文件，保留用户的自定义设置和注释"""
     logger = get_logger("ConfigLoader")
 
     try:
         # 读取模板和现有配置
-        template_data, template_content = _parse_toml_with_comments(template_path)
+        template_data, template_content = _parse_toml_with_comments(template_path_str)
 
         # 如果配置文件存在，读取现有配置
         existing_data = {}
@@ -226,7 +172,8 @@ def _update_config_from_template(config_path: str, template_path: str) -> None:
             if isinstance(values, dict):
                 merged_data[section] = {}
                 for key, template_value in values.items():
-                    # 如果现有配置中有相同的键，且不是默认值，则保留用户设置
+                    # 如果现有配置中有相同的键，且与模板值不同，则保留用户设置；
+                    # api_key 的占位值不保留，版本号始终跟随模板
                     if (
                         section in existing_data
                         and key in existing_data[section]
@@ -262,7 +209,7 @@ def _generate_config_content_with_comments(
     lines = []
 
     # 添加文件头注释
-    lines.append("# Maicraft插件配置")
+    lines.append("# Maicraft配置")
     lines.append("")
 
     def _format_toml_value(value: Any) -> str:
@@ -361,74 +308,47 @@ def _extract_key_comment(content: str, section: str, key: str) -> str:
     return ""
 
 
-def _create_default_config_toml(config_path: str) -> None:
-    """从config-template.toml创建默认的config.toml文件"""
+def _create_config_from_template(config_path: Path, template: Path) -> None:
+    """把模板复制为配置文件"""
     logger = get_logger("ConfigLoader")
 
-    try:
-        template_path = _get_template_path()
+    if not template.exists():
+        logger.error("[配置创建] 未找到config-template.toml文件")
+        raise FileNotFoundError(f"config-template.toml文件不存在: {template}")
 
-        if not os.path.exists(template_path):
-            logger.error("[配置创建] 未找到config-template.toml文件")
-            raise FileNotFoundError("config-template.toml文件不存在")
-
-        # 读取模板文件内容
-        with open(template_path, "r", encoding="utf-8") as f:
-            template_content = f.read()
-
-        # 确保目录存在
-        os.makedirs(os.path.dirname(config_path), exist_ok=True)
-
-        # 创建config.toml文件
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(template_content)
-
-        logger.info(f"[配置创建] 已从模板创建配置文件: {config_path}")
-
-    except Exception as e:
-        logger.error(f"[配置创建] 创建默认配置文件失败: {e}")
-        raise
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(template, config_path)
+    logger.info(f"[配置创建] 已从模板创建配置文件: {config_path}")
 
 
-def _get_config_path() -> str:
-    """获取配置文件路径，如果不存在则创建默认配置，如果版本过旧则更新"""
+def load_config(path: str | os.PathLike[str] | None = None) -> MaicraftConfig:
+    """加载配置并校验成 MaicraftConfig
+
+    文件不存在时从模板复制；存在时模板版本更高就升级（先备份，保留用户设置和注释）。
+
+    Args:
+        path: 配置文件路径；不给时用运行目录下的 config.toml
+
+    Returns:
+        校验后的配置对象
+    """
     logger = get_logger("ConfigLoader")
 
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(base_dir, "config.toml")
+    config_path = Path(path) if path is not None else Path.cwd() / "config.toml"
+    template = template_path()
 
-    if not os.path.exists(config_path):
-        # 兼容从项目根目录执行
-        config_path = os.path.join(os.getcwd(), "config.toml")
-
-    template_path = _get_template_path()
-
-    if not os.path.exists(config_path):
-        # 如果配置文件不存在，创建默认配置文件
+    if not config_path.exists():
         logger.info("[配置加载] 未找到config.toml文件，正在创建默认配置...")
-        _create_default_config_toml(config_path)
+        _create_config_from_template(config_path, template)
     else:
-        # 如果配置文件存在，检查版本是否需要更新
-        try:
-            template_version = _get_version_from_toml(template_path)
-            config_version = _get_version_from_toml(config_path)
+        template_version = _get_version_from_toml(str(template))
+        config_version = _get_version_from_toml(str(config_path))
 
-            if template_version and config_version:
-                if _compare_versions(template_version, config_version):
-                    logger.info(f"[配置更新] 检测到模板版本更新: {config_version} -> {template_version}")
-                    _update_config_from_template(config_path, template_path)
-                else:
-                    logger.debug(f"[配置检查] 配置文件版本已是最新: {config_version}")
-            else:
-                logger.warning("[配置检查] 无法获取版本信息，跳过版本检查")
+        if template_version and config_version and _compare_versions(template_version, config_version):
+            logger.info(f"[配置更新] 检测到模板版本更新: {config_version} -> {template_version}")
+            _update_config_from_template(str(config_path), str(template))
 
-        except Exception as e:
-            logger.warning(f"[配置检查] 版本检查失败: {e}")
+    with open(config_path, "rb") as f:
+        data = tomli.load(f)
 
-    return config_path
-
-
-# 加载配置
-config_path = _get_config_path()
-config_dict = _load_config_from_toml(config_path)
-global_config = load_config_from_dict(config_dict)
+    return MaicraftConfig.model_validate(data)

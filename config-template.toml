@@ -1,51 +1,10 @@
-# Maicraft插件配置模板
+# Maicraft配置模板
 [inner]
-version = "0.2.0"
-
-[bot]
-player_name = "Mai"
-bot_name = "麦麦"
-
-[game]
-goal = "以合适的步骤，建立营地，挖到16个钻石，并存储"
-
-[llm]
-model = "gpt-4o"
-temperature = 0.2
-api_key = "your-api-key"  # 可选，如果不设置将使用环境变量
-base_url = "https://api.openai.com/v1"  # 可选，用于自定义API端点
-max_tokens = 1024
-
-[llm_fast]
-model = "gpt-4o-mini"
-temperature = 0.2
-api_key = "your-api-key"  # 可选，如果不设置将使用环境变量
-base_url = "https://api.openai.com/v1"  # 可选，用于自定义API端点
-max_tokens = 1024
-
-[visual]
-enable = false
-
-
-[vlm]
-model = "gpt-4o"
-temperature = 0.3
-api_key = "your-api-key"
-base_url = "https://api.openai.com/v1"
-max_tokens = 1024
-
-[api]
-# API服务器监听地址 (0.0.0.0表示监听所有网络接口)
-host = "0.0.0.0"
-# API服务器监听端口 (默认为20914)
-port = 20914
-# 是否启用CORS跨域支持 (用于前端访问)
-enable_cors = true
-# API服务器日志级别 (warning级别可以减少干扰主程序的日志输出)
-log_level = "warning"
+# 配置格式的版本，只用来和模板比较，不要手动改
+version = "0.3.0"
 
 [logging]
-# level 可选: TRACE, DEBUG, INFO, SUCCESS, WARNING, ERROR, CRITICAL
+# 日志级别，可选: TRACE, DEBUG, INFO, SUCCESS, WARNING, ERROR, CRITICAL
 level = "INFO"
 # 是否启用JSON Lines格式文件输出（控制台始终为彩色格式）
 enable_json = false
@@ -53,16 +12,59 @@ enable_json = false
 log_to_file = true
 # 日志目录
 log_dir = "logs"
-# 日志轮转策略 (推荐按大小: "10 MB", "50 MB", "100 MB" 或按时间: "1 day", "6 hours", "1 hour")
-rotation = "10 MB"
-# 日志保留策略 (推荐: "3 days", "1 week", "10 files")
-retention = "3 days"
-# 是否启用层次化日志记录 (不同级别输出到不同文件)
+# 日志轮转策略（如"1 day", "100 MB"）
+rotation = "1 day"
+# 日志保留策略（如"7 days", "10 files"）
+retention = "7 days"
+# 是否启用层次化日志记录（不同级别输出到不同文件）
 enable_hierarchical_logging = true
-# 内存中保留的最近日志条数 (用于快速查询)
+# 内存中保留的最近日志条数
 max_recent_logs = 1000
 
-[threat_detection]
-# 威胁生物检测配置
-threat_detection_range = 16.0  # 威胁生物检测范围（方块距离）
-enable_threat_detection = true  # 是否启用威胁生物检测
+[llm]
+# 模型名称
+model = "gpt-4o-mini"
+# API密钥
+api_key = ""
+# API基础URL，留空使用服务方默认地址
+base_url = ""
+# 温度参数，越高越发散
+temperature = 0.2
+# 单次回复的最大token数
+max_tokens = 4096
+# 模型能不能看图；false 时 mod 发来的画面只把旁边的文字给模型
+supports_vision = false
+# 单次模型请求的超时秒数
+request_timeout_s = 120.0
+
+[mod]
+# mod 的 MCP 端点地址
+url = "http://127.0.0.1:8766/mcp"
+# 事件长轮询的单次等待毫秒数
+events_wait_ms = 25000
+
+[agent]
+# 一轮对话里最多执行的动作步数
+max_steps_per_turn = 30
+# 空闲多少分钟后主动叫醒模型；0 表示不主动叫醒
+idle_replan_minutes = 10
+# 连续多少轮没有实际动作后停下
+max_empty_turns = 3
+# 长期目标，原样放进提示词
+long_term_goal = ""
+# 提示词里保留最近几条动作结果
+keep_recent_results = 6
+
+[chat]
+# 除角色名之外还接受哪些称呼
+mention_names = []
+# 把相邻消息合并处理的等待毫秒数
+batch_window_ms = 2000
+
+[maigo]
+# 是否启用 Maigo 对接
+enabled = false
+# Maigo 服务地址
+url = "http://127.0.0.1:8768"
+# 在 Maigo 里使用的分支标识
+branch_id = "maicraft"
