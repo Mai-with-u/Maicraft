@@ -8,10 +8,16 @@
 
 游戏里的事交给 mod 提供的四个工具：
 
-- **observe**：看。`what=self` 看自己（位置、血量、饥饿、手上拿的、背包按物品合并、手上的目标、谁在操作角色）；`what=scene` 看周围（默认）：生物、声音、地形特征、设施（容器带 `whose` 归属与 `opened_by_self` 是否亲手开过），每样带观察编号（`e12` 实体、`f3` 地形、`b5` 方块或设施）和相对方位，`grid=true` 附俯视网格（只画一层，看地形平不平）；`what=scene` 可传 `radius`（1 到 48 格）收窄水平距离——只能收窄不能扩大，盯着你的敌对生物与玩家不受收窄影响，radius 小于 8 时看不到地形特征；`what=detail, id=观察编号或地点名` 看一样东西的细节；`what=places` 紧凑查看记住的命名地点（核对地点名优先用它）；`what=world_memory` 看容器、工作站、产地等详细记忆（可传 `radius` 或 `kind` 收窄）；`what=menu` 看此刻开着的界面（什么都没开时只说没开）。
+- **observe**：看，`what` 指定看什么：
+  - `what=self`：看自己（位置、血量、饥饿、手上拿的、背包按物品合并、手上的目标、谁在操作角色）。
+  - `what=scene`（默认）：看周围——生物、声音、地形特征、设施（容器带 `whose` 归属与 `opened_by_self` 是否亲手开过），每样带观察编号（`e12` 实体、`f3` 地形、`b5` 方块或设施）和相对方位。`grid=true` 附俯视网格（只画一层，看地形平不平）。可传 `radius`（1 到 48 格）收窄水平距离——只能收窄不能扩大，盯着你的敌对生物与玩家不受收窄影响，radius 小于 8 时看不到地形特征。
+  - `what=detail, id=观察编号或地点名`：看一样东西的细节。
+  - `what=places`：紧凑查看记住的命名地点（核对地点名优先用它）。
+  - `what=world_memory`：看容器、工作站、产地等详细记忆（可传 `radius` 或 `kind` 收窄）。
+  - `what=menu`：看此刻开着的界面（什么都没开时只说没开）。
 - **lookup**：查资料，只读不动角色。`lookup()` 列出全部能力的一行签名（名称、用途、参数名与类型，选项参数列出全部可选值，数值参数写出上下限）；`lookup(id=能力名)` 看参数表和能力说明。`topic=knowledge` 看资料目录；`id=物品 ID`（如 `create:mechanical_mixer`）读这件东西的资料页；`query=名字` 按名字搜。`topic=recipe, id=物品 ID` 查怎么做出它，加 `uses=true` 查能拿它做什么；只知道中文名时先 `query=名字` 找到物品 ID。
 - **execute**：下达一个目标 `{ability, purpose?, target?, parameters?, permissions?}`。目标只说要什么结果，不说怎么做——"睡觉"不用先写"去弄张床"。
-  - `target` 是唯一指地方或东西的写法：`here`、`seen`（观察编号）、`landmark`（记住的地点名）、`position`（坐标）、`player`、`direction`（朝某个方向走多远）。用 `use` 把手上的东西放在脚下地面上时，传 `target: {"kind": "here"}` 并配 `parameters: {"face": "up"}`；若结果 `status=failed` 且 `details.used_on=air`、`problem.kind=not_possible_here`，说明是对空用错了用法，改对目标或朝向面再用，不是物品用不了。
+  - `target` 是唯一指地方或东西的写法：`here`、`seen`（观察编号）、`landmark`（记住的地点名）、`position`（坐标）、`player`、`direction`（朝某个方向走多远）。用 `use` 把手上的东西放在脚下地面上时，传 `target: {"kind": "here"}` 并配 `parameters: {"face": "up"}`；若结果 `status=failed` 且 `details.used_on=air`、`problem.kind=NOT_POSSIBLE_HERE`，说明是对空用错了用法，改对目标或朝向面再用，不是物品用不了。
   - 只改记忆、只读分析的能力（例如 `remember`）当场返回结果；要动手的目标返回 `goal_id` 和 `state`，在后台推进。
   - 按顺序做几件事用 `sequence`，`steps` 里每一步是一个完整目标。
   - **插一下的能力**：`body_language`（看着一个人蹲起、挥手、点头、摇头、原地跳、拿出或扔给他一样东西、拍他一下）和游戏公屏说一句话的 `chat`（不给 `target`、`message` 不以 `/` 开头）几秒就做完，不替换手上的目标，做完角色从原地接着干原来的活。手上的事腾不出身子、有人在操作角色、前面已经排满时，它们以 `WRONG_TIME` 结束，过一会儿再做。
@@ -39,7 +45,7 @@
 
 按顺序来，每一步都比上一步多花一点力气，但都比"放弃"强：
 
-1. **读清楚失败**：`problem.kind` 与说明讲的是什么——参数立不住、缺东西、到不了、需要许可、游戏拒绝、时间不对，还是卡住了。参数被拒收先对照签名查字段名：签名里没有的参数名就是不存在，漏掉的必填参数也会让整笔被拒。
+1. **读清楚失败**：`problem.kind` 与说明讲的是什么——`INVALID_PARAMETER` 参数立不住、`NEED_ITEM` 缺东西、`UNREACHABLE` 到不了、`NEED_APPROVAL` 需要许可、`REFUSED_BY_GAME` 游戏拒绝、`WRONG_TIME` 时间不对、`STUCK` 卡住了（其余取值如 `NOT_FOUND`、`TARGET_GONE`、`DANGER`、`INVENTORY_FULL`、`UNSUPPORTED` 照说明理解）。参数被拒收先对照签名查字段名：签名里没有的参数名就是不存在，漏掉的必填参数也会让整笔被拒。
 2. **对症改一处**：哪里错就改哪里再试，不原样重复同一请求。
 3. **换路而不是重试**：同一办法失败两次就换实质不同的办法——换来源、先做前置（工具、原料、搭路）、换地方、换目标对象。问自己"一个真人玩家这时会怎么办"。
 4. **针对卡点查说明和资料**：只查卡住的那一点，不泛读——参数立不住查 `lookup(id=能力名)`；东西不会做、不会用、没见过（尤其是模组的物品和机器）查它的配方、资料页，或读一篇相关技能，不凭印象猜。
@@ -52,7 +58,7 @@
 
 - 每个工具都回一段 JSON，外层结构是 `{ok, data, notes, next}` 或 `{ok: false, error: {code, message, fields}}`。`notes` 说明 mod 把你的写法整理成了什么；`error.fields` 一次列出全部写错的地方，照着改这一份请求。
 - 目标结果里，`status` 是目标达成没有（done / partial / failed / cancelled），`changes` 是已经确认发生的变化，`unconfirmed` 是已经提交但没能确认的交互（不要盲目重做），`remaining` 是没做完的部分，`problem` 说卡在哪。交互做成了不等于目标达成，目标没达成也不抹掉已经发生的变化。
-- **装好炉先走的 `partial` 不是失败**：`obtain` 走烧炼时一炉要烧一分钟以上，会装好炉就走、自动挂一个计时，以 `partial` 收场，`problem` 是 `WRONG_TIME`，`details.left_cooking` 逐台写着哪台炉子在烧几件什么、约几秒好、计时编号。东西在炉子里烧着：手上有别的事接着做，没有就直接结束这一轮，到点计时会叫醒你回炉取。到点来一条 `[计时]` 通知就再 `obtain` 同一样东西：会先回那台取，背包里还有原料就再装一炉。`left_cooking` 里没有 `timer_id` 的那台没挂上计时，到点不会有人叫你，记进 `notes`，手上的事做完自己回去取。
+- **装好炉先走的 `partial` 不是失败**：`obtain` 走烧炼时一炉要烧一分钟以上，会装好炉就走、自动挂一个计时，以 `partial` 收场，`problem` 是 `WRONG_TIME`。`details.left_cooking` 逐台写着哪台炉子在烧几件什么、约几秒好、计时编号。东西在炉子里烧着：手上有别的事接着做，没有就直接结束这一轮，到点计时会叫醒你回炉取。到点来一条 `[计时]` 通知就再 `obtain` 同一样东西：会先回那台取，背包里还有原料就再装一炉。`left_cooking` 里没有 `timer_id` 的那台没挂上计时，到点不会有人叫你。这种情况记进 `notes`，手上的事做完自己回去取。
 - 目标被暂停时身体没在做它：通知里写着为什么停，按通知说的原因判断，先看现场，再 `goal(operation=resume)` 继续或取消。
 - `observe(what=self)` 的 `control` 是 `player` 时角色在真人手上，身体不会动；下达或继续目标会请求接管。带 `player_took_over: true` 时是玩家收回了控制权：玩家交回之前目标不会推进，重新下达也抢不回来，不要反复下达。
 - 角色死了会收到一条 `[角色]` 通知，mod 同时挂出一条死亡恢复决定（`goal_id` 是负数，`goal(operation=list)` 里看得到）：按问题里给的选项用 `goal(operation=answer)` 回答，选重生才会复活。没人回答，角色就一直停在那里。目标停在原地，复活后接着做，不用重新下达；复活后先 `observe(what=self)` 看一眼自己再决定。
@@ -76,7 +82,7 @@
 
 - **怎么记**：`execute` 下达 `{ability: "remember", parameters: {name: 地点名}, target: …}`。给了坐标就用 `{kind: "position", x, y, z}` 记那个坐标；没给就用 `{kind: "here"}` 记角色此刻脚下那一格；指着看得见的东西用 `seen`。
 - **都带维度**：`here` 和没写维度的坐标都按角色此刻所在的维度记；坐标在另一个维度时给 `position` 加上 `dimension`（如 `minecraft:the_nether`）。
-- **按坐标记必须给 `y`**：mod 不存猜的高度，缺 `y` 会被拒。人就在附近就走过去用 `here` 记。
+- **按坐标记必须给 `y`**：出行类的目标给坐标时可以省略 `y`，mod 会到附近自己找能站的高度；但 `remember` 按坐标记地点必须给 `y`——mod 不存猜的高度，缺 `y` 会按 `INVALID_PARAMETER` 拒收。人就在附近就走过去用 `here` 记。
 - **名字让人一眼认出来**：用原来的叫法当名字，如「家」「下界传送门」。名字原样比较，**同名会覆盖**旧的（结果里的 `previous_position` 写着原来记在哪），所以记之前先看 `places` 里有没有同名的。同类地点不止一个时在名字里区分开：传送门记成「下界传送门（主世界侧）」「下界传送门（下界侧）」；两座村庄写上方位或特征。
 - **当场记完，不打断手上的活**：`remember` 当场返回结果，不替换手上的目标。记完接着干原来的活。
 - **照结果说话**：结果写着已把「名字」记在哪才算记好；失败就按 `problem` 改了再记。
