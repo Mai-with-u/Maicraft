@@ -20,6 +20,7 @@ __all__ = [
     "decision",
     "goal_finished",
     "goal_gone",
+    "goal_paused",
     "goal_question",
     "goal_stalled",
     "world_switched",
@@ -58,6 +59,18 @@ def goal_finished(run: GoalRun, self_brief: str) -> WakeDecision:
 
 def goal_question(run: GoalRun) -> WakeDecision:
     return WakeDecision(wake=True, message=question_notice(run))
+
+
+def goal_paused(run: GoalRun) -> WakeDecision:
+    """目标被暂停：角色没有在做它，叫醒模型决定继续还是取消。"""
+    return WakeDecision(
+        wake=True,
+        message=(
+            f"[系统] 目标 {run.goal_id}（{goal_label(run)}）被暂停了，角色没有在做它：{run.doing or '（mod 没说原因）'}。"
+            '先看一眼现场（observe(what="self")）再决定：用 goal(operation=resume, goal_id='
+            f"{run.goal_id}) 继续，或用 goal(operation=cancel, goal_id={run.goal_id}) 取消。"
+        ),
+    )
 
 
 def goal_stalled(run: GoalRun) -> WakeDecision:

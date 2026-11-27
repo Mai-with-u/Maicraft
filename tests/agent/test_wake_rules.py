@@ -100,3 +100,15 @@ def test_world_switched_first_recognition_and_switch() -> None:
     assert switched.wake is True
     assert "角色进了另一个存档「生存存档」（原来在「旧存档」）" in switched.message
     assert "之前的目标都不在了" in switched.message
+
+
+def test_goal_paused_wakes_with_resume_or_cancel_hint() -> None:
+    from maicraft.agent.wake_rules import goal_paused
+
+    result = goal_paused(_run(state="paused", doing="等许可"))
+    assert result.wake is True
+    assert result.message.startswith("[系统] 目标 7（maicraft:gather，砍木头）被暂停了")
+    assert "角色没有在做它" in result.message
+    assert 'observe(what="self")' in result.message
+    assert "goal(operation=resume, goal_id=7)" in result.message
+    assert "goal(operation=cancel, goal_id=7)" in result.message

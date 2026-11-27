@@ -409,24 +409,36 @@ async def test_no_idle_wake_while_goal_tracked(tmp_path: Path) -> None:
 
 async def test_world_switch_moves_notes_and_rebuilds_opening(tmp_path: Path) -> None:
     harness = Harness(tmp_path)
+    # 第一轮里下达一个目标、写下笔记（此时还没认出存档，笔记先留在内存里）
+    harness.llm.steps.append(
+        llm_tool_call("execute", {"goal": {"ability": "gather", "purpose": "砍木头"}}, "call-exec")
+    )
+    harness.llm.steps.append(llm_text())
     harness.llm.steps.append(llm_tool_call("notes", {"notebook": "老存档的笔记"}, "call-notes"))
     harness.llm.steps.append(llm_text())
     harness.start()
     try:
-        await until(lambda: harness.llm.call_count >= 1)
+        await until(lambda: harness.llm.call_count >= 2)
         await pump()
         # 进第一个存档：第一次认出，还没归属的笔记归它
         harness.mod.enter_world("aaaaaaaa-1111")
         await until(lambda: harness.notes.world_id == "aaaaaaaa-1111")
         await until(lambda: harness.notes.document()["notebook"] == "老存档的笔记")
-        # 换存档：笔记换一份、开局资料重建、模型被告知换了存档
+        # 换存档：旧目标都不在了，笔记换一份
+        harness.mod.change_world()
         harness.mod.enter_world("bbbbbbbb-2222")
-        await until(lambda: harness.llm.call_count >= 4)
+        await until(lambda: harness.llm.call_count >= 5)
         assert harness.notes.world_id == "bbbbbbbb-2222"
         assert harness.notes.document()["notebook"] == ""
-        # 第一次认出存档与换存档各叫醒一轮，开局资料在换存档后重建
-        assert "另一个存档" in user_text(harness.llm.calls[3])
-        assert "以下是程序代为读取的开局资料" in user_text(harness.llm.calls[3])
+        assert "另一个存档" in user_text(harness.llm.calls[4])
+        # 开局资料在换存档后重建：资料里的 self 带新存档编号、目标清单里没有旧存档的目标
+        opening = next(
+            str(m.get("content"))
+            for m in harness.llm.calls[4]
+            if m.get("role") == "user" and "以下是程序代为读取的开局资料" in str(m.get("content"))
+        )
+        assert "bbbbbbbb-2222" in opening
+        assert "砍木头" not in opening
     finally:
         await harness.stop()
 
@@ -512,5 +524,115 @@ async def test_invalid_json_arguments_get_retry_hint(tmp_path: Path) -> None:
         await until(lambda: harness.llm.call_count >= 2)
         tool_message = next(m for m in harness.llm.calls[1] if m.get("role") == "tool")
         assert "参数不是合法的 JSON" in str(tool_message["content"])
+    finally:
+        await harness.stop()
+
+
+async def test_chat_loop_survives_disconnect_and_wakes_after_reconnect(tmp_path: Path) -> None:
+    clock = ManualClock()
+    mod = FakeMod(clock=clock)
+
+    async def call(name: str, arguments: dict[str, Any]) -> Any:
+        if events_down["flag"] and name == "events":
+            raise ModUnavailable("读公屏时断了")
+        return reply_of(await mod.invoke(name, arguments))
+
+    events_down = {"flag": False}
+    harness = Harness(tmp_path, mod=mod, call=call)
+    harness.start()
+    try:
+        await until(lambda: harness.llm.call_count >= 1)
+        await pump(30)
+        # 公屏读取在途时断线：公屏循环不死，主循环回去重连
+        events_down["flag"] = True
+        await pump(30)
+        chat_message(mod, "Steve", "Mai 过来一下")
+        await pump(30)
+        events_down["flag"] = False
+        await pump(30)  # 重连后让公屏流重新建立游标
+        await until(lambda: harness.llm.call_count >= 2)  # 重连后的第一轮
+        harness.clock.advance(5)
+        chat_message(mod, "Steve", "Mai 又点了一次")
+        await until(lambda: harness.llm.call_count >= 3)
+        await until(lambda: "[游戏公屏] Steve：Mai 又点了一次" in all_user_text(harness.llm, start=1))
+    finally:
+        await harness.stop()
+
+
+async def test_in_game_name_counts_as_mention(tmp_path: Path) -> None:
+    harness = Harness(tmp_path, config=make_config())
+    harness.config.chat.mention_names = []
+    harness.mod.self_view["name"] = "Mai"
+    harness.start()
+    try:
+        await until(lambda: harness.llm.call_count >= 1)
+        await pump(30)
+        # 名字是从 observe(self) 读到的：读到之后游戏内名字就算点名
+        chat_message(harness.mod, "Steve", "Mai 过来一下")
+        await until(lambda: harness.llm.call_count >= 2)
+        assert "[游戏公屏] Steve：Mai 过来一下" in all_user_text(harness.llm, start=1)
+    finally:
+        await harness.stop()
+
+
+async def test_sky_changes_keep_only_latest_carry(tmp_path: Path) -> None:
+    harness = Harness(tmp_path)
+    harness.start()
+    try:
+        await until(lambda: harness.llm.call_count >= 1)
+        await pump(30)
+        harness.mod.body_event("sky_changed", "天黑了")
+        harness.mod.body_event("sky_changed", "下雨了")
+        harness.mod.body_event("sky_changed", "天亮了")
+        await pump(30)
+        harness.mod.body_event("timer_due", "计时到点")
+        await until(lambda: harness.llm.call_count >= 2)
+        joined = all_user_text(harness.llm, start=1)
+        assert "[角色] 天亮了" in joined
+        assert "天黑了" not in joined
+        assert "下雨了" not in joined
+    finally:
+        await harness.stop()
+
+
+async def test_paused_goal_wakes_model_with_pause_notice(tmp_path: Path) -> None:
+    harness = Harness(tmp_path)
+    harness.llm.steps.append(
+        llm_tool_call("execute", {"goal": {"ability": "gather", "purpose": "砍木头"}}, "call-exec")
+    )
+    harness.llm.steps.append(llm_text())
+    harness.start()
+    try:
+        await until(lambda: harness.llm.call_count >= 2)
+        await pump(30)
+        goal_id = max(harness.mod.goals)
+        harness.mod.pause(goal_id)
+        await until(lambda: harness.llm.call_count >= 3)
+        joined = all_user_text(harness.llm, start=2)
+        assert f"[系统] 目标 {goal_id}（maicraft:gather，砍木头）被暂停了" in joined
+        assert "goal(operation=resume, goal_id=" in joined
+    finally:
+        await harness.stop()
+
+
+async def test_idle_wake_fires_while_goal_paused(tmp_path: Path) -> None:
+    harness = Harness(tmp_path, config=make_config(idle_replan_minutes=1, max_empty_turns=5))
+    harness.llm.steps.append(
+        llm_tool_call("execute", {"goal": {"ability": "gather", "purpose": "砍木头"}}, "call-exec")
+    )
+    harness.llm.steps.append(llm_text())
+    harness.start()
+    try:
+        await until(lambda: harness.llm.call_count >= 2)
+        await pump(30)
+        goal_id = max(harness.mod.goals)
+        harness.mod.pause(goal_id)
+        await until(lambda: harness.llm.call_count >= 3)
+        await pump(30)
+        # 被暂停的目标不算忙：空闲叫醒照常触发
+        harness.clock.advance(61)
+        await pump()
+        await until(lambda: harness.llm.call_count >= 4)
+        assert "你已经空闲 1 分钟" in user_text(harness.llm.calls[3])
     finally:
         await harness.stop()

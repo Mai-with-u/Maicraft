@@ -144,6 +144,11 @@ class ChatFilter:
         # 最近的聊天记录（点名与没点名的都算，旧的在前）
         self._recent: deque[ChatMessage] = deque(maxlen=self._max_recent)
 
+    def add_names(self, names: Sequence[str]) -> None:
+        """运行时追加点名名字（如读到角色在游戏里的名字之后）；重复的忽略。"""
+        fresh = {_content_key(name) for name in names if name and name.strip()}
+        self._names = tuple(sorted(set(self._names) | fresh))
+
     def add(self, message: ChatMessage) -> None:
         """收到一条公屏消息：私聊和点名的进待唤醒合批；其余只进最近的聊天记录。"""
         now = int(self._clock_ms())

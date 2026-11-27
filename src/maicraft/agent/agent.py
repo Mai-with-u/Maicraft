@@ -33,6 +33,7 @@ from .mod_protocol import (
     LOOKUP,
     NO_REPLY,
     OBSERVE,
+    PAUSED,
     TOOLS_FOR_MODEL,
     EventsPage,
     GoalRun,
@@ -47,6 +48,7 @@ from .wake_rules import body_event as body_event_rule
 from .wake_rules import decision as decision_rule
 from .wake_rules import goal_finished as goal_finished_rule
 from .wake_rules import goal_gone as goal_gone_rule
+from .wake_rules import goal_paused as goal_paused_rule
 from .wake_rules import goal_question as goal_question_rule
 from .wake_rules import goal_stalled as goal_stalled_rule
 from .wake_rules import world_switched as world_switched_rule
@@ -230,7 +232,14 @@ class Agent:
             return None
         if reply.error_code == NO_REPLY:
             return None
+        self._absorb_self_reply(reply)
         return reply
+
+    def _absorb_self_reply(self, reply: ModReply) -> None:
+        """读自己时顺手认下角色在游戏里的名字：公屏点名按它判定。"""
+        name = str(reply.data.get("name") or "").strip()
+        if name:
+            self._chat_filter.add_names([name])
 
     async def _prepare_connection(self) -> None:
         """连上后取工具定义、刷新技能目录、重建开局资料。中途断开就留给下一次连接重试。"""
@@ -271,6 +280,8 @@ class Agent:
             logger.warning("与 MaiCraftMod 的连接不可用，等重新连上")
         self._connected = False
         self._goal_watch.forget_stream()
+        # 断线可能由后台任务先发现：惊动等在原地的主循环回去重连
+        self._waker.set()
 
     # ----- 等待叫醒 -----
 
@@ -280,6 +291,9 @@ class Agent:
         等待用唤醒事件加超时实现，超时取各时刻里最近的；等待被空唤醒打断时返回 None。
         """
         while True:
+            if not self._connected:
+                # 断线由后台任务发现时，等待在这里被打断，回到主循环顶端去重连
+                return None
             # 模型服务不可用时不取公屏批：消息留在筛选器里，等重试的那一轮一起带上
             chat_batch = self._chat_filter.take_due() if self._fatal_retry_at_s is None else []
             if self._fatal_retry_at_s is None and (self._wake_queue.can_wake() or chat_batch):
@@ -326,6 +340,15 @@ class Agent:
     def _replay_due(self, now: float) -> bool:
         return bool(self._pending_replay) and self._replay_at_s is not None and now >= self._replay_at_s
 
+    def _has_busy_goal(self) -> bool:
+        """有没有在跑或等回答的目标：被暂停的目标不算忙，不阻止空闲叫醒。"""
+        paused = {
+            int(note["goal_id"])
+            for note in self._registry.all_notes_sorted()
+            if note.get("state") == PAUSED and isinstance(note.get("goal_id"), int)
+        }
+        return any(goal_id not in paused for goal_id in self._goal_watch.tracked_ids())
+
     def _idle_due(self, now: float) -> bool:
         """空闲叫醒的条件都满足了吗：开了这个功能、真的空闲、没超连续空轮上限、时间也到了。"""
         agent_config = self._config.agent
@@ -333,7 +356,7 @@ class Agent:
             return False
         if self._pending_replay or self._fatal_retry_at_s is not None:
             return False
-        if self._goal_watch.tracked_ids() or self._registry.actionable_goal_ids():
+        if self._has_busy_goal():
             return False
         if self._empty_turns >= agent_config.max_empty_turns:
             return False
@@ -354,8 +377,7 @@ class Agent:
             agent_config.idle_replan_minutes > 0
             and not self._pending_replay
             and self._fatal_retry_at_s is None
-            and not self._goal_watch.tracked_ids()
-            and not self._registry.actionable_goal_ids()
+            and not self._has_busy_goal()
             and self._empty_turns < agent_config.max_empty_turns
         ):
             candidates.append(max(0.0, self._last_turn_end_s + agent_config.idle_replan_minutes * 60 - now))
@@ -378,6 +400,10 @@ class Agent:
         except ModUnavailable:
             self._mark_disconnected()
             return
+        if self._need_opening:
+            # 换存档后重建一次：旧存档的开局资料不再发给模型
+            self._opening_material = await self._build_opening_material()
+            self._need_opening = False
         wake_contents = self._turn_wake_contents
         if source == WakeSource.STARTUP and not wake_contents:
             # 连上后的第一轮：队列里已经攒下的内容一并带上
@@ -432,6 +458,7 @@ class Agent:
     async def _turn_material(self) -> str:
         """每轮资料：角色此刻的样子、目标清单、笔记、技能目录、长期目标、记忆背景。"""
         self_reply = await self._call(OBSERVE, {"what": "self"})
+        self._absorb_self_reply(self_reply)
         goals_reply = await self._call(GOAL, {"operation": "list"})
         sections = [
             "### 自己此刻（observe what=self）\n" + json_text(self_reply.raw),
@@ -459,6 +486,7 @@ class Agent:
     async def _build_opening_material(self) -> str:
         """开局资料：程序代读的四个调用，逐项写明调用与回复，作为一条 user 消息交给模型。"""
         self_reply = await self._call(OBSERVE, {"what": "self"})
+        self._absorb_self_reply(self_reply)
         scene_reply = await self._call(OBSERVE, {"what": "scene"})
         lookup_reply = await self._call(LOOKUP, {})
         goals_reply = await self._call(GOAL, {"operation": "list"})
@@ -709,7 +737,10 @@ class Agent:
         elif run.state == AWAITING_ANSWER:
             self._wake_queue.push_wake(goal_question_rule(run).message)
             self._notify()
-        # 其余（paused、resumed、在跑）不推内容
+        elif run.state == PAUSED:
+            self._wake_queue.push_wake(goal_paused_rule(run).message)
+            self._notify()
+        # 其余（resumed、在跑）不推内容
 
     async def _report_milestone(self, run: GoalRun) -> None:
         try:
@@ -730,6 +761,9 @@ class Agent:
         if decision.wake:
             self._wake_queue.push_wake(decision.message)
             self._notify()
+        elif str(event.get("kind") or "") == "sky_changed":
+            # 天色变化只留最新一条，不让它挤掉别的捎带内容
+            self._wake_queue.replace_sky(decision.message)
         else:
             self._wake_queue.push_carry(decision.message)
 
@@ -741,7 +775,19 @@ class Agent:
             if not self._connected:
                 await self._sleep(1.0)
                 continue
-            read = await self._chat_stream.read()
+            try:
+                read = await self._chat_stream.read()
+            except ModUnavailable:
+                # 断线往往正是在途的这次读取上发现的：记下已断开，等重连后继续读
+                self._mark_disconnected()
+                await self._sleep(1.0)
+                continue
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - 单次读取异常不杀死公屏循环
+                logger.warning(f"读取公屏事件出错，稍后重试：{type(exc).__name__}: {exc}")
+                await self._sleep(1.0)
+                continue
             if read is None:
                 continue
             if read.first or read.resync:

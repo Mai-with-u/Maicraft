@@ -277,3 +277,23 @@ def test_from_event_defaults_optional_fields() -> None:
     assert message.private is False
     assert message.mentions == ()
     assert message.repeat == 1
+
+
+def test_add_names_extends_wake_names_at_runtime() -> None:
+    from maicraft.agent.chat_filter import ChatFilter, ChatMessage
+
+    now_ms = [0]
+    filter_ = ChatFilter(names=[], clock_ms=lambda: int(now_ms[0]))
+    filter_.add(ChatMessage(cursor=1, kind="player", sender="Steve", text="Mai 过来一下"))
+    now_ms[0] += 5000
+    assert filter_.take_due() == []  # 还没认名字，不叫醒
+    filter_.add_names(["Mai", "Mai", " "])
+    filter_.add(ChatMessage(cursor=2, kind="player", sender="Steve", text="Mai 过来一下"))
+    now_ms[0] += 5000
+    due = filter_.take_due()
+    assert [message.text for message in due] == ["Mai 过来一下"]
+    # 重复的名字去重，不改变判定
+    filter_.add_names(["Mai"])
+    filter_.add(ChatMessage(cursor=3, kind="player", sender="Steve", text="Mai 在吗"))
+    now_ms[0] += 5000
+    assert len(filter_.take_due()) == 1
