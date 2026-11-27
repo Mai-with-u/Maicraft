@@ -2,7 +2,7 @@
 
 import json
 from types import SimpleNamespace
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 import pytest
 from openai import (
@@ -19,6 +19,7 @@ import maicraft.openai_client.token_usage_manager as token_usage_manager_module
 from maicraft.openai_client.llm_request import LLMClient
 from maicraft.openai_client.modelconfig import ModelConfig
 from maicraft.openai_client.token_usage_manager import TokenUsageManager
+from tests.fakes import FakeClient
 
 
 @pytest.fixture(autouse=True)
@@ -38,28 +39,6 @@ def make_model_config(**kwargs) -> ModelConfig:
     )
     defaults.update(kwargs)
     return ModelConfig(**defaults)
-
-
-class FakeCompletions:
-    """替身：记录请求参数，返回预设的回复或抛出预设的异常。"""
-
-    def __init__(self, response=None, error: Optional[Exception] = None):
-        self.response = response
-        self.error = error
-        self.kwargs: Optional[Dict[str, Any]] = None
-
-    async def create(self, **kwargs):
-        self.kwargs = kwargs
-        if self.error is not None:
-            raise self.error
-        return self.response
-
-
-class FakeClient:
-    """替身：只实现 LLMClient 用到的 chat.completions.create。"""
-
-    def __init__(self, response=None, error: Optional[Exception] = None):
-        self.chat = SimpleNamespace(completions=FakeCompletions(response, error))
 
 
 def make_response(tool_calls=None, content: str = "你好") -> SimpleNamespace:
@@ -308,12 +287,6 @@ async def test_chat_messages_other_error_is_unknown(tmp_path):
     assert result["error_kind"] == "unknown"
 
 
-async def test_client_created_by_llmclient_gets_configured_timeout():
-    llm = LLMClient(make_model_config(request_timeout_s=60.0))
-
-    assert llm.client.timeout == 60.0
-
-
 async def test_default_timeout_is_120_seconds():
     llm = LLMClient(make_model_config())
 
@@ -352,7 +325,11 @@ async def test_chat_completion_behavior_unchanged(tmp_path):
 
 
 def test_timeout_reaches_self_created_client():
-    """自己创建客户端时，配置里的超时会传给 AsyncOpenAI（float 会展开成 httpx.Timeout 的各阶段）。"""
+    """自己创建客户端时，配置里的超时会传给 AsyncOpenAI。
+
+    用断言 timeout 属性代替 httpx.MockTransport 发真实请求：本环境不装 httpx，
+    且 AsyncOpenAI 在这个版本里把 float 超时原样存进 client.timeout，直接断言就能确认传参。
+    """
     llm = LLMClient(make_model_config(request_timeout_s=45.0))
 
     assert llm.client.timeout == 45.0

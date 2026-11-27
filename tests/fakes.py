@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import mcp_types
@@ -547,3 +548,28 @@ class FakeMod:
         # 每个世界的目标编号各自从 1 数起，可能撞上上一个世界的编号。
         self._next_id = 1
         self._new_event.set()
+
+
+class FakeCompletions:
+    """替身：记录请求参数，返回预设的回复或抛出预设的异常。"""
+
+    def __init__(self, response: Any = None, error: Exception | None = None) -> None:
+        self.response = response
+        self.error = error
+        self.kwargs: dict[str, Any] | None = None
+
+    async def create(self, **kwargs: Any) -> Any:
+        self.kwargs = kwargs
+        if self.error is not None:
+            raise self.error
+        return self.response
+
+
+class FakeClient:
+    """替身：只实现 LLMClient 用到的 chat.completions.create。
+
+    response 是 create 成功时要回的对象，error 给了就在 create 时抛出。
+    """
+
+    def __init__(self, response: Any = None, error: Exception | None = None) -> None:
+        self.chat = SimpleNamespace(completions=FakeCompletions(response, error))
