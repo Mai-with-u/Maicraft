@@ -1,0 +1,61 @@
+[project]
+name = "maicraft"
+version = "1.0.0"
+description = "基于 MaiCraftMod 的独立常驻 Minecraft agent"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    # 调用 OpenAI 兼容接口的模型
+    "openai>=1.0.0",
+    # 配置校验
+    "pydantic>=2",
+    # 日志
+    "loguru",
+    # 比较配置文件的格式版本
+    "packaging",
+    # 发给模型之前判断图片格式
+    "Pillow",
+    # 连接 MaiCraftMod 的 MCP 端点
+    "fastmcp>=3.0.0",
+]
+
+[project.scripts]
+maicraft = "maicraft.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=0.21",
+    "ruff>=0.1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/maicraft"]
+
+[tool.uv]
+# 锁文件里只记官方源：本机配置了镜像时，不让镜像地址进锁文件。
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+default = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "I", "ASYNC"]
+ignore = ["E501", "ASYNC109", "ASYNC110"]
+
+[tool.ruff.format]
+docstring-code-format = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

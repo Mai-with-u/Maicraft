@@ -1,8 +1,8 @@
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Dict, Any
-from utils.logger import get_logger
+from maicraft.utils.logger import get_logger
 import os
-import tomli
+import tomllib as tomli
 import shutil
 from packaging import version
 

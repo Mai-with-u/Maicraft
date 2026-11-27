@@ -217,3 +217,5 @@ marimo/_lsp/
 __marimo__/
 
 logs/
+# ZCode 在仓库里生成的本地文件
+.zcode/

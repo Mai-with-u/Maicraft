@@ -15,7 +15,7 @@ import time
 from typing import Dict, Any, Optional, Callable
 from pathlib import Path
 import tomllib
-from utils.logger import get_logger
+from maicraft.utils.logger import get_logger
 
 # 全局Token使用量管理器实例
 global_token_manager = None
@@ -47,7 +47,7 @@ class TokenUsageManager:
         """初始化token使用量管理器
 
         Args:
-            usage_dir: 使用量记录文件存储目录，相对于项目根目录
+            usage_dir: 使用量记录文件存储目录，相对于运行目录
             update_callback: 使用量更新时的回调函数，参数为(model_name, usage_data)
             use_global: 是否使用全局实例
         """
@@ -61,9 +61,9 @@ class TokenUsageManager:
             self.__dict__.update(global_token_manager.__dict__)
             return
 
-        # 获取项目根目录
-        project_root = Path(__file__).parent.parent
-        self.usage_dir = project_root / usage_dir
+        # 用量文件放在运行目录下，和日志目录同一口径：包装进 src/maicraft 之后，
+        # 模块文件所在位置不再能推出项目根目录。
+        self.usage_dir = Path(usage_dir)
         self.usage_dir.mkdir(exist_ok=True)
 
         # 初始化logger

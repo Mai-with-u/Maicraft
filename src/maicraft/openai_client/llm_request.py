@@ -5,9 +5,9 @@ from io import BytesIO
 from typing import List, Dict, Any, Optional, Union
 from openai import AsyncOpenAI
 from PIL import Image
-from utils.logger import get_logger
-from openai_client.modelconfig import ModelConfig
-from openai_client.token_usage_manager import TokenUsageManager
+from maicraft.utils.logger import get_logger
+from maicraft.openai_client.modelconfig import ModelConfig
+from maicraft.openai_client.token_usage_manager import TokenUsageManager
 
         
 class LLMClient:
