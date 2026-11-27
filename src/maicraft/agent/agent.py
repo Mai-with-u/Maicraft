@@ -280,7 +280,8 @@ class Agent:
         等待用唤醒事件加超时实现，超时取各时刻里最近的；等待被空唤醒打断时返回 None。
         """
         while True:
-            chat_batch = self._chat_filter.take_due()
+            # 模型服务不可用时不取公屏批：消息留在筛选器里，等重试的那一轮一起带上
+            chat_batch = self._chat_filter.take_due() if self._fatal_retry_at_s is None else []
             if self._fatal_retry_at_s is None and (self._wake_queue.can_wake() or chat_batch):
                 self._stash_wake_contents(chat_batch)
                 return WakeSource.EXTERNAL
