@@ -3,11 +3,11 @@
 基于loguru实现，支持JSON格式输出和分级日志文件管理
 """
 
-import json
 import os
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any, Union
+from typing import Any, Dict, Optional
+
 from loguru import logger as _logger
 
 
@@ -146,15 +146,12 @@ class LoggerManager:
                 # JSON格式文件输出
                 json_format = '{{"timestamp": "{time:YYYY-MM-DD HH:mm:ss.SSS}", "level": "{level}", "level_no": {level.no}, "module": "{extra[module]}", "message": "{message}", "file": "{file}", "line": {line}, "function": "{function}", "process": {process.id}, "thread": {thread.id}}}'
 
-                _logger.add(
-                    os.path.join(log_dir, "app.jsonl"),
-                    format=json_format,
-                    level=level,
-                    **base_config
-                )
+                _logger.add(os.path.join(log_dir, "app.jsonl"), format=json_format, level=level, **base_config)
             else:
                 # 普通文本格式文件输出
-                text_format = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[module]: <15} | {file}:{line} - {message}"
+                text_format = (
+                    "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[module]: <15} | {file}:{line} - {message}"
+                )
 
                 if enable_hierarchical:
                     # 层次化日志记录：不同级别输出到不同文件，低级文件包含高级别日志
@@ -163,7 +160,7 @@ class LoggerManager:
                         ("info", "INFO"),
                         ("warning", "WARNING"),
                         ("error", "ERROR"),
-                        ("critical", "CRITICAL")
+                        ("critical", "CRITICAL"),
                     ]
 
                     for file_prefix, min_level in log_levels:
@@ -173,16 +170,12 @@ class LoggerManager:
                             level=min_level,
                             filter=lambda record, level=min_level: record["level"].no >= _logger.level(level).no,
                             colorize=False,
-                            **base_config
+                            **base_config,
                         )
                 else:
                     # 单一日志文件
                     _logger.add(
-                        os.path.join(log_dir, "app.log"),
-                        format=text_format,
-                        level=level,
-                        colorize=False,
-                        **base_config
+                        os.path.join(log_dir, "app.log"), format=text_format, level=level, colorize=False, **base_config
                     )
 
     def get_logger(self, name: str):
@@ -207,7 +200,7 @@ class LoggerManager:
         level: Optional[str] = None,
         module: Optional[str] = None,
         message_contains: Optional[str] = None,
-        since_minutes: Optional[int] = None
+        since_minutes: Optional[int] = None,
     ) -> list:
         """
         获取最近的日志记录，支持过滤
@@ -230,8 +223,9 @@ class LoggerManager:
         if since_minutes is not None:
             cutoff_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=since_minutes)
             logs = [
-                log for log in logs
-                if datetime.datetime.fromisoformat(log["timestamp"].replace('Z', '+00:00')) > cutoff_time
+                log
+                for log in logs
+                if datetime.datetime.fromisoformat(log["timestamp"].replace("Z", "+00:00")) > cutoff_time
             ]
 
         # 按级别过滤
@@ -244,10 +238,7 @@ class LoggerManager:
 
         # 按消息内容过滤
         if message_contains is not None:
-            logs = [
-                log for log in logs
-                if message_contains.lower() in log["message"].lower()
-            ]
+            logs = [log for log in logs if message_contains.lower() in log["message"].lower()]
 
         # 返回最新的limit条记录
         return logs[-limit:] if limit > 0 else logs
@@ -275,10 +266,7 @@ class LoggerManager:
         module_counts = Counter(log["module"] for log in logs)
 
         # 计算时间范围
-        timestamps = [
-            datetime.datetime.fromisoformat(log["timestamp"].replace('Z', '+00:00'))
-            for log in logs
-        ]
+        timestamps = [datetime.datetime.fromisoformat(log["timestamp"].replace("Z", "+00:00")) for log in logs]
         time_range = {
             "earliest": min(timestamps).isoformat(),
             "latest": max(timestamps).isoformat(),
@@ -431,11 +419,7 @@ def get_disk_usage(log_dir: str = "logs") -> dict:
                 total_size += log_file.stat().st_size
                 file_count += 1
 
-    return {
-        "file_count": file_count,
-        "total_size": total_size,
-        "total_size_mb": round(total_size / (1024 * 1024), 2)
-    }
+    return {"file_count": file_count, "total_size": total_size, "total_size_mb": round(total_size / (1024 * 1024), 2)}
 
 
 def get_recent_logs(
@@ -443,7 +427,7 @@ def get_recent_logs(
     level: Optional[str] = None,
     module: Optional[str] = None,
     message_contains: Optional[str] = None,
-    since_minutes: Optional[int] = None
+    since_minutes: Optional[int] = None,
 ) -> list:
     """
     获取最近的日志记录，支持过滤
@@ -469,11 +453,7 @@ def get_recent_logs(
         module_logs = get_recent_logs(module="database", limit=50)
     """
     return _logger_manager.get_recent_logs(
-        limit=limit,
-        level=level,
-        module=module,
-        message_contains=message_contains,
-        since_minutes=since_minutes
+        limit=limit, level=level, module=module, message_contains=message_contains, since_minutes=since_minutes
     )
 
 
@@ -510,4 +490,3 @@ def clear_recent_logs() -> int:
 def get_logger_manager() -> LoggerManager:
     """获取全局日志管理器实例"""
     return _logger_manager
-
