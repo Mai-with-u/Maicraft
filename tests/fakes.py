@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from collections.abc import Callable
 from types import SimpleNamespace
 from typing import Any
 
@@ -573,3 +574,96 @@ class FakeClient:
 
     def __init__(self, response: Any = None, error: Exception | None = None) -> None:
         self.chat = SimpleNamespace(completions=FakeCompletions(response, error))
+
+
+class ScriptedLLM:
+    """按剧本回复的假模型客户端：chat_messages 的剧本是（收到的消息列表 → 返回字典）的函数。
+
+    script 给一个函数时每次都用它；给函数列表时按次序取用，用完后按默认的"不调工具直接结束"回复。
+    calls 记下每次收到的完整消息列表，供断言。
+    """
+
+    def __init__(self, script: Callable[[list[dict[str, Any]]], dict[str, Any]] | list[Any] | None = None) -> None:
+        # script 是单个函数时一直用它；是列表时按次序取用一次
+        self.script = script if callable(script) else None
+        self.steps: list[Any] = list(script) if isinstance(script, list) else []
+        self.calls: list[list[dict[str, Any]]] = []
+
+    async def chat_messages(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        self.calls.append(messages)
+        if self.steps:
+            step = self.steps.pop(0)
+            return step(messages) if callable(step) else step
+        if self.script is not None:
+            return self.script(messages)
+        return {"success": True, "content": None, "finish_reason": "stop"}
+
+    @property
+    def call_count(self) -> int:
+        return len(self.calls)
+
+
+def llm_text(content: str | None = None) -> dict[str, Any]:
+    """剧本用：模型不调工具，说一句话就结束这一轮。"""
+    return {"success": True, "content": content, "finish_reason": "stop"}
+
+
+def llm_failure(error_kind: str, error: str = "请求失败") -> dict[str, Any]:
+    """剧本用：模型调用失败，error_kind 决定主循环的重试策略。"""
+    return {"success": False, "error": error, "content": None, "error_kind": error_kind}
+
+
+def llm_tool_call(name: str, arguments: dict[str, Any], call_id: str) -> dict[str, Any]:
+    """剧本用：模型发起一个工具调用。"""
+    return {
+        "success": True,
+        "content": None,
+        "finish_reason": "tool_calls",
+        "tool_calls": [
+            {
+                "id": call_id,
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(arguments, ensure_ascii=False)},
+            }
+        ],
+    }
+
+
+class FakeModEndpoint:
+    """在 FakeMod 外面包上工具清单与技能资源：顶替 ModClient 交给 Agent / SkillCatalog 的部分。
+
+    skill_uris 是 skill:// 地址到 SKILL.md 正文的对照；list_tools_error 给了就在
+    list_tools 时抛出，用来模拟连不上。
+    """
+
+    def __init__(self, mod: FakeMod, skills: dict[str, str] | None = None) -> None:
+        self.mod = mod
+        self.skill_uris = dict(skills or {SKILL_URI: SKILL_TEXT})
+        self.list_tools_error: Exception | None = None
+        self.tools = [
+            mcp_types.Tool(name=name, description=f"{name} 的说明", input_schema={"type": "object"})
+            for name in ("observe", "lookup", "execute", "goal")
+        ]
+
+    async def list_tools(self) -> list[mcp_types.Tool]:
+        if self.list_tools_error is not None:
+            raise self.list_tools_error
+        return list(self.tools)
+
+    async def list_resources(self) -> list[mcp_types.Resource]:
+        return [
+            mcp_types.Resource(
+                uri=uri, name=str(uri).split("/")[-2], description=f"{uri} 的技能", mime_type="text/markdown"
+            )
+            for uri in self.skill_uris
+        ]
+
+    async def read_resource(self, uri: str) -> list[mcp_types.TextResourceContents]:
+        if uri not in self.skill_uris:
+            raise FileNotFoundError(f"没有这个资源：{uri}")
+        return [mcp_types.TextResourceContents(uri=uri, text=self.skill_uris[uri])]
