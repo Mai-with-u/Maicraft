@@ -412,7 +412,7 @@ class TokenUsageManager:
         price_info = ""
         if price_config:
             price_info = (
-                f"\n价格配置: 输入{price_config['price_in']}/1K tokens, 输出{price_config['price_out']}/1K tokens"
+                f"\n价格配置: 输入{price_config['price_in']}/100万 tokens, 输出{price_config['price_out']}/100万 tokens"
             )
 
         summary = f"""
