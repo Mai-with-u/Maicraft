@@ -678,7 +678,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastmcp", specifier = ">=3.0.0" },
+    { name = "fastmcp", specifier = ">=4.2,<5" },
     { name = "loguru" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "packaging" },

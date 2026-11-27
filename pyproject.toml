@@ -16,8 +16,9 @@ dependencies = [
     "packaging",
     # 发给模型之前判断图片格式
     "Pillow",
-    # 连接 MaiCraftMod 的 MCP 端点
-    "fastmcp>=3.0.0",
+    # 连接 MaiCraftMod 的 MCP 端点。代码按 4.x 的字段名写（is_error、input_schema），
+    # 4 的大版本内不再改动这些名字；升到 5 之前要重新核对。
+    "fastmcp>=4.2,<5",
 ]
 
 [project.scripts]
