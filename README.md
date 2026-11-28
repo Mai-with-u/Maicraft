@@ -27,7 +27,7 @@ uv run maicraft --version  # 打印版本号
 uv run maicraft --config 其他路径.toml  # 指定配置文件，默认用运行目录下的 config.toml
 ```
 
-第一次运行时，程序会从 `config-template.toml` 复制生成 `config.toml`。运行前必须先填 `[llm]` 里的模型和 API key。之后模板更新时，程序会升级旧配置文件（先备份，保留你的设置和注释）。
+第一次运行时，程序会从 `config-template.toml` 复制生成 `config.toml`。运行前必须先填 `[llm]` 里的模型和 API key。之后模板更新时，程序会升级旧配置文件（先备份，保留你的设置和注释）。目前请在仓库目录里运行：配置模板在仓库根目录，没有打进安装包。从旧版本升级时，旧配置会自动迁移，原文件留有 `config.toml.backup` 备份。
 
 ## 配置
 

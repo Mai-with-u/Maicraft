@@ -67,6 +67,4 @@ src/maicraft/
 
 dev 是开发主线，平时不动版本号；发布时的步骤与版本号规则见 [docs/release.md](docs/release.md)。
 
----
-
 请用中文与我交流，并尽可能使用中文注释。
