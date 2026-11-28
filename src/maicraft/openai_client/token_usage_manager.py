@@ -71,9 +71,9 @@ class TokenUsageManager:
             return
 
         # 用量文件放在运行目录下，和日志目录同一口径：包装进 src/maicraft 之后，
-        # 模块文件所在位置不再能推出项目根目录。
+        # 模块文件所在位置不再能推出项目根目录。目录等到第一次要写文件时才创建，
+        # 不让只是构造管理器（跑测试、导入模块）就在运行目录建出空目录。
         self.usage_dir = Path(usage_dir)
-        self.usage_dir.mkdir(exist_ok=True)
 
         # 初始化logger
         self.logger = get_logger("TokenUsageManager")
@@ -261,6 +261,7 @@ class TokenUsageManager:
         file_path = self._get_usage_file_path(model_name)
 
         try:
+            self.usage_dir.mkdir(parents=True, exist_ok=True)
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(usage_data, f, ensure_ascii=False, indent=2)
         except IOError as e:
