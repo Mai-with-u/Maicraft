@@ -68,7 +68,11 @@ def reply_of(result: mcp_types.CallToolResult) -> ModReply:
     """把工具调用的结果读成统一回复；拿不到 mod 自己的回复时按 no_reply 如实记下。
 
     第一个文字块的正文是一段 JSON，就是回复的外层结构：ok 为真取 data，为假取
-    error.code 与 error.message。type == "image" 的内容块收进 images。
+    error.code 与 error.message。mod 声明了但还没接入的工具回的是
+    ``{"success": false, "error": {...}}``（没有 ok 键），也按失败的回复解读，错误码与
+    说明取自它的 error，交给模型当数据看，不当作连接故障。no_reply 只留给根本没拿到
+    回复的情形：没有文字块、正文不是 JSON，或读不出成败结构的对象。type == "image"
+    的内容块收进 images。
     """
     images: list[ModImage] = []
     text: str | None = None
@@ -83,12 +87,14 @@ def reply_of(result: mcp_types.CallToolResult) -> ModReply:
         raw = json.loads(text)
     except json.JSONDecodeError:
         return no_reply(f"回复不是 JSON：{text}")
-    if not isinstance(raw, dict) or "ok" not in raw:
-        return no_reply(f"回复里没有 ok 键：{text}")
+    if not isinstance(raw, dict):
+        return no_reply(f"回复不是对象：{text}")
     if raw.get("ok") is True:
         data = raw.get("data") if isinstance(raw.get("data"), dict) else {}
         return ModReply(ok=True, data=data, raw=raw, images=images)
     error = raw.get("error") if isinstance(raw.get("error"), dict) else {}
+    if "ok" not in raw and not error:
+        return no_reply(f"回复里没有 ok 键：{text}")
     return ModReply(
         ok=False,
         error_code=str(error.get("code") or ""),

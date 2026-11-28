@@ -63,6 +63,27 @@ def test_unreadable_reply_is_reported_as_no_reply() -> None:
     assert made.ok is False and made.error_code == NO_REPLY and made.error_message == "超时了"
 
 
+def test_not_ready_reply_reads_as_a_failed_reply() -> None:
+    """mod 已声明但未接线的工具回 ``{"success": false, "error": {...}}``（没有 ok 键）：
+    按失败的回复解读，错误码与说明取自 error，不当成没有回复。"""
+    not_ready = {
+        "success": False,
+        "error": {
+            "code": "not_ready",
+            "message": "工具 observe 已声明，但它的真实行为还没有接入。",
+            "retryable": False,
+        },
+    }
+    result = tool_result(not_ready)
+
+    reply = reply_of(result)
+
+    assert reply.ok is False
+    assert reply.error_code == "not_ready"
+    assert "还没有接入" in reply.error_message
+    assert reply.raw == not_ready
+
+
 def test_image_blocks_are_collected() -> None:
     result = tool_result(ok_envelope({"picture": {}}), images=[("image/jpeg", "AAAA"), ("image/png", "BBBB")])
     reply = reply_of(result)

@@ -17,7 +17,16 @@ from maicraft.agent.mod_protocol import LOOKUP, no_reply, reply_of
 from maicraft.agent.notes import Notes
 from maicraft.config import MaicraftConfig
 from maicraft.mod_client import ModUnavailable
-from tests.fakes import FakeMod, FakeModEndpoint, ManualClock, ScriptedLLM, llm_failure, llm_text, llm_tool_call
+from tests.fakes import (
+    FakeMod,
+    FakeModEndpoint,
+    ManualClock,
+    ScriptedLLM,
+    llm_failure,
+    llm_text,
+    llm_tool_call,
+    tool_result,
+)
 
 # 一句超过拆分阈值的公屏发言（100 多字）
 LONG_CHAT_TEXT = (
@@ -469,6 +478,37 @@ async def test_turn_material_no_reply_is_treated_as_disconnect(tmp_path: Path) -
         goal_down["flag"] = False
         await until(lambda: harness.llm.call_count >= 2, tries=20000)
         assert "计时到点：看看炉子" in all_user_text(harness.llm, start=1)
+    finally:
+        await harness.stop()
+
+
+async def test_not_ready_tool_reply_is_data_not_disconnect(tmp_path: Path) -> None:
+    """mod 未接线工具回 ``{"success": false, "error": {...}}``：作为失败结果交给模型，不当断线处理。"""
+    mod = FakeMod()
+    not_ready = {
+        "success": False,
+        "error": {"code": "not_ready", "message": "工具 observe 已声明，但它的真实行为还没有接入。"},
+    }
+
+    async def call(name: str, arguments: dict[str, Any]) -> Any:
+        if name == "observe":
+            return reply_of(tool_result(not_ready))
+        return reply_of(await mod.invoke(name, arguments))
+
+    harness = Harness(tmp_path, mod=mod, call=call)
+    harness.llm.steps.append(llm_tool_call("observe", {"what": "self"}, "call-obs"))
+    harness.llm.steps.append(llm_text())
+    harness.start()
+    try:
+        await until(lambda: harness.llm.call_count >= 2)
+        await pump(30)
+        tool_message = next(m for m in harness.llm.calls[1] if m.get("role") == "tool")
+        content = str(tool_message["content"])
+        assert "not_ready" in content
+        assert "还没有接入" in content
+        assert "现在连不上游戏" not in content
+        # 没有标记断线：agent 还连着，主循环没有回到重连
+        assert harness.agent._connected
     finally:
         await harness.stop()
 
