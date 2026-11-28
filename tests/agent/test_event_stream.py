@@ -142,6 +142,23 @@ async def test_stream_change_is_reported_and_read_resets() -> None:
     assert read is not None and read.first is True and read.stream_changed is True
 
 
+async def test_a_whole_new_stream_page_hands_over_its_events() -> None:
+    """换流且这一页就是新流的全部：事件随 StreamRead 交出去（不是只建游标），由调用方决定处理。"""
+    mod = _ScriptedEvents()
+    mod.replies.append(_page(cursor=2))
+    stream = EventStream(call=mod)
+    await stream.read()
+
+    events = [{"cursor": 1, "kind": "paused", "goal_id": 3}]
+    mod.replies.append(_page(stream_id="s2", cursor=1, events=events))
+    read = await stream.read()
+
+    assert read is not None
+    assert read.first is False and read.stream_changed is True and read.resync is True
+    assert read.page.events == events
+    assert stream.stream_id == "s2" and stream.cursor == 1
+
+
 async def test_stream_changing_mid_backlog_fails_the_read_and_forgot_the_cursor() -> None:
     mod = _ScriptedEvents()
     mod.replies.append(_page(stream_id="s2", cursor=1, has_more=True))

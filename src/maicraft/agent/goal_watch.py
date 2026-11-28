@@ -11,7 +11,9 @@ mod 把目标运行的处境变化写进事件流，这里只盯本 agent 自己
 - 事件流换了（换世界、重进世界）时游标作废，逐个重新查询在跟踪的目标：查得到就照常
   交回调，查不到或已经不是原来那个目标，就按"不在了"交给回调，不让它挂在待办里
   永远等不到结果；流编号真变了（连接重建后也和之前读到的比）时告诉回调这是换流后
-  查到的，目标停着多半是读回来先停着，别的暂停不说成重进世界。
+  查到的，目标停着多半是读回来先停着，别的暂停不说成重进世界。换流后读到的第一页
+  如果就是新流的全部（积压没有多页），页里的事件照常逐条处理——重进世界最初几秒
+  发生的暂停、身体事件都在这一页里；积压多页时按接手处理，旧事件不补发。
 
 连接没就绪或读取失败时退避重试，不抛出；跟踪循环本身不调用模型，空闲时只是一条
 挂着的长轮询。
@@ -162,21 +164,31 @@ class GoalWatch:
     async def step(self) -> None:
         """读一页事件并处理。
 
-        游标作废或流更换后在跟踪的目标逐个重新查询；首次读取（接手或连接重建后）只建立游标，
-        这一页与翻掉的积压不补发——不过此时若还跟踪着目标，也逐个重新核对一遍它们还在不在。
-        其余情况逐条处理页里的事件。
+        换流且这一页就是新流的全部（``has_more`` 为假）时，页里的角色事件逐条照常处理——
+        重进世界最初几秒发生的暂停、身体事件都在这一页里，整页丢弃会让它们永远看不到；
+        处理完再重新核对在跟踪的目标（事件已逐个核对过的目标不再重复查）。
+        其余的流更换与游标作废按接手或重新核对处理，这一页的事件不补发；首次读取
+        （接手或连接重建后）只建立游标，不过此时若还跟踪着目标，也逐个重新核对一遍。
         """
         read = await self._stream.read()
         if read is None:
             return
         await self._see_page(read.page)
+        whole_new_stream = not read.first and read.stream_changed and not read.page.has_more
+        refreshed: set[int] = set()
+        if whole_new_stream:
+            for event in read.page.events:
+                goal_id = await self._absorb(event)
+                if goal_id is not None:
+                    refreshed.add(goal_id)
         if read.resync or (read.first and self._goals):
-            await self._resync(read.stream_changed)
+            await self._resync(read.stream_changed, skip=refreshed)
             return
         if read.first:
             return
-        for event in read.page.events:
-            await self._absorb(event)
+        if not whole_new_stream:
+            for event in read.page.events:
+                await self._absorb(event)
 
     async def _see_page(self, page: EventsPage) -> None:
         """把这一页交给页回调（认存档）；回调出错只记日志，不打断目标跟踪。"""
@@ -187,13 +199,14 @@ class GoalWatch:
         except Exception as exc:  # noqa: BLE001 - 认存档出错不影响读事件、跟踪目标
             logger.warning(f"处理事件页上的存档信息出错: {type(exc).__name__}: {exc}")
 
-    async def _absorb(self, event: dict[str, Any]) -> None:
+    async def _absorb(self, event: dict[str, Any]) -> int | None:
+        """处理一条事件；事件触发了一次目标查询时返回那个目标编号，其余返回 None。"""
         kind = str(event.get("kind") or "")
         goal_id = event.get("goal_id")
         if kind == "asked" and isinstance(goal_id, int) and goal_id < 0 and goal_id not in self._goals:
             # 负数编号是 mod 自己挂出的决策（死亡恢复），不是谁下达的目标：不跟踪，读一次交给决策回调。
             await self._decision_asked(goal_id)
-            return
+            return None
         if (
             isinstance(goal_id, int)
             and goal_id in self._goals
@@ -205,9 +218,10 @@ class GoalWatch:
             await self._refresh(
                 goal_id, self_brief=brief.strip() if isinstance(brief, str) else "", stalled=kind == _GOAL_STALLED_KIND
             )
-            return
+            return goal_id
         # 其余事件原样交给事件回调，不限事件的种类。
         await self._on_body_event(event)
+        return None
 
     async def _refresh(
         self, goal_id: int, after_world_change: bool = False, self_brief: str = "", stalled: bool = False
@@ -250,8 +264,11 @@ class GoalWatch:
             return
         await self._on_decision_asked(run)
 
-    async def _resync(self, after_world_change: bool = False) -> None:
+    async def _resync(self, after_world_change: bool = False, skip: set[int] | None = None) -> None:
+        """逐个重新核对在跟踪的目标；``skip`` 里的编号刚被本页的事件核对过，不再重复查。"""
         for goal_id in list(self._goals):
+            if skip is not None and goal_id in skip:
+                continue
             await self._refresh(goal_id, after_world_change)
 
     @staticmethod

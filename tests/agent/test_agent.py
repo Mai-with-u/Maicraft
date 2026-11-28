@@ -383,6 +383,35 @@ async def test_fatal_wait_does_not_spin_on_a_due_chat_batch(tmp_path: Path) -> N
         await harness.stop()
 
 
+async def test_reenter_world_whole_new_stream_page_wakes_model_once(tmp_path: Path) -> None:
+    """同一个存档里事件流换了（重进世界），新流那一页带着恢复成暂停的目标：模型被叫醒一次且只一次。
+
+    这一页就是新流的全部时页里事件照常处理（暂停通知交给模型）；事件核对过的目标不再重复查询，
+    不会产生第二条暂停通知。
+    """
+    harness = Harness(tmp_path)
+    harness.llm.steps.append(
+        llm_tool_call("execute", {"goal": {"ability": "gather", "purpose": "砍木头"}}, "call-exec")
+    )
+    harness.llm.steps.append(llm_text())
+    harness.start()
+    try:
+        await until(lambda: harness.llm.call_count >= 2)
+        await pump(30)
+        goal_id = max(harness.mod.goals)
+        # 重进世界：mod 换了一条流，恢复出来的目标停着，新流那一页带着它的暂停事件
+        harness.mod.stream_id = "stream-2"
+        harness.mod.pause(goal_id)
+        await until(lambda: harness.llm.call_count >= 3)
+        await pump(30)
+        assert harness.llm.call_count == 3
+        joined = all_user_text(harness.llm, start=2)
+        assert f"目标 {goal_id}" in joined
+        assert joined.count("被暂停了") == 1
+    finally:
+        await harness.stop()
+
+
 async def test_invalid_failure_ends_turn_without_retry(tmp_path: Path) -> None:
     harness = Harness(tmp_path)
     harness.llm.steps.append(llm_failure("invalid", "参数被拒"))

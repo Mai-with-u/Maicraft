@@ -6,7 +6,7 @@ from typing import Any
 
 from maicraft.agent.goal_watch import GoalWatch
 from maicraft.agent.mod_protocol import EventsPage, GoalRun, goal_run_of, no_reply, reply_of
-from tests.fakes import FakeMod
+from tests.fakes import FakeMod, ok_envelope, tool_result
 
 
 class _Recorder:
@@ -307,3 +307,102 @@ async def test_tracking_roster_basics() -> None:
 
     watch.clear()
     assert watch.tracked_ids() == []
+
+
+class _ScriptedEventsCall:
+    """events 按脚本回页、其余调用转发给 FakeMod：用来构造 FakeMod 给不出的页（积压多页、游标失效）。
+
+    pages 是调用方持有的列表，脚本按次序取用；调用方可以在构造之后继续往里追加页。
+    """
+
+    def __init__(self, mod: FakeMod, pages: list[dict[str, Any]]) -> None:
+        self._mod = mod
+        self._pages = pages
+
+    async def __call__(self, name: str, arguments: dict[str, Any]) -> Any:
+        if name == "events":
+            assert self._pages, "脚本里没有准备好下一页回复"
+            return reply_of(tool_result(ok_envelope(self._pages.pop(0))))
+        return reply_of(await self._mod.invoke(name, arguments))
+
+
+def _watch_with_script(mod: FakeMod, recorder: _Recorder, pages: list[dict[str, Any]]) -> GoalWatch:
+    return GoalWatch(
+        call=_ScriptedEventsCall(mod, pages),
+        connected=lambda: True,
+        on_goal_changed=recorder.on_changed,
+        on_goal_gone=recorder.on_gone,
+        on_body_event=recorder.on_body,
+        on_decision_asked=recorder.on_decision,
+        on_page=recorder.on_page,
+        wait_ms=10,
+        sleep=_noop_sleep,
+    )
+
+
+async def test_a_whole_new_stream_page_is_processed_then_resynced() -> None:
+    """换流后这一页就是新流的全部：页里的暂停事件与不叫醒事件都照常处理，然后重新核对没被事件核对过的目标。"""
+    mod, recorder = FakeMod(), _Recorder()
+    watch = _watch(mod, recorder)
+    await watch.step()
+    goal_a = await _launch(mod, watch, "maicraft:gather")
+    goal_b = await _launch(mod, watch, "maicraft:obtain")
+    # 重进世界：mod 换了一条流，恢复出来的目标 A 停着，页里还带一条身体事件；目标 B 没有事件
+    mod.stream_id = "stream-2"
+    mod.pause(goal_a)
+    mod.body_event("sky_changed", "天黑了")
+
+    await watch.step()
+
+    # 暂停事件走现有的目标变更路径，只产生一次通知；身体事件原样交给事件回调
+    assert [run.goal_id for run in recorder.changed] == [goal_a, goal_b]
+    assert recorder.changed[0].state == "paused"
+    assert [event["kind"] for event in recorder.body] == ["sky_changed"]
+    # 事件里的目标 A 刚被核对过不再重复查；目标 B 由重新核对查到，交回调时说明是换流后查到的
+    assert recorder.after_world_change == [False, True]
+    assert watch.tracking(goal_a) and watch.tracking(goal_b)
+
+
+async def test_a_stream_change_with_backlog_still_takes_over_without_processing() -> None:
+    """换流后积压多页：按接手处理，返回的那一页事件不处理，只重新核对在跟踪的目标。"""
+    mod, recorder = FakeMod(), _Recorder()
+    pages: list[dict[str, Any]] = [{"stream_id": "stream-1", "cursor": 0, "events": [], "has_more": False}]
+    watch = _watch_with_script(mod, recorder, pages)
+    await watch.step()
+    goal_id = await _launch(mod, watch)
+    mod.stream_id = "stream-2"
+    mod.pause(goal_id)
+    pages.append({"stream_id": "stream-2", "cursor": 1, "events": [dict(mod.events[-1])], "has_more": True})
+    pages.append({"stream_id": "stream-2", "cursor": 1, "events": [], "has_more": False})
+
+    await watch.step()
+
+    assert recorder.body == [], "积压多页的换流按接手处理，页里的事件不补发"
+    assert [run.goal_id for run in recorder.changed] == [goal_id]
+    assert recorder.changed[0].state == "paused"
+    assert recorder.after_world_change == [True]
+
+
+async def test_an_invalid_cursor_on_the_same_stream_does_not_reprocess_events() -> None:
+    """同一条流只是游标失效：这一页的事件不处理（不重复），在跟踪的目标照常重新核对。"""
+    mod, recorder = FakeMod(), _Recorder()
+    pages: list[dict[str, Any]] = [{"stream_id": "stream-1", "cursor": 0, "events": [], "has_more": False}]
+    watch = _watch_with_script(mod, recorder, pages)
+    await watch.step()
+    goal_id = await _launch(mod, watch)
+    mod.pause(goal_id)
+    pages.append(
+        {
+            "stream_id": "stream-1",
+            "cursor": 1,
+            "events": [dict(mod.events[-1])],
+            "has_more": False,
+            "cursor_status": "stream_changed",
+        }
+    )
+
+    await watch.step()
+
+    assert recorder.body == [], "同一流游标失效的页事件不重复处理"
+    assert [run.goal_id for run in recorder.changed] == [goal_id]
+    assert recorder.after_world_change == [False]
