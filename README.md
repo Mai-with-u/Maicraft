@@ -1,156 +1,72 @@
-# Maicraft-Mai
+# Maicraft
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status](https://img.shields.io/badge/Status-Active-green.svg)](https://github.com/MaiToTheGate/Maicraft-Mai)
+Maicraft 是一个独立运行的程序，通过 [MaiCraftMod](https://github.com/Mai-with-u/MaiCraftMod) 操作 Minecraft 里的一个角色。程序常驻运行：没事时挂着等 mod 的事件，有必要时才调用大模型，由模型决定给 mod 下达什么目标。mod 像正常玩家那样用游戏的正常交互把目标做成，并如实报告结果。
 
-一个基于大语言模型的智能Minecraft代理系统，能够自主执行复杂的游戏任务，如挖矿、制作、建造等。
-还能与玩家进行流畅的交流，根据玩家的反馈进行行为
+仓库地址：<https://github.com/Mai-with-u/Maicraft>
 
-## 🎯 项目简介
+> 当前实现还没有做过实机验证，请先在备份过的测试世界里试用。
 
-Maicraft-Mai 是一个智能的Minecraft游戏代理系统，它结合了：
-- **大语言模型 (LLM)** - 提供智能决策和任务规划
-- **基于Mineflayer的MC操控** 基于maicraft-mcp，操作mc游戏
-- **Agent** - 采用ReAct逻辑的Agent
+## 前提
 
-该系统能够理解游戏环境，制定策略，执行简单的MC游玩。
-```
+- Python 3.12
+- [uv](https://docs.astral.sh/uv/)
+- 装了 MaiCraftMod 的 Minecraft 客户端
+- agent 必须和游戏在同一台机器上：mod 的 MCP 端点只允许本机访问
 
-## 待实现清单
+## 安装与运行
 
-- 更好的建筑建造和矿道建造
-- 基于语音的实时交流
-- 与Amaidesu配合，使用tts生成麦麦语音
-- 配合MaiCore的插件进行交互
+Windows 下双击 `start.cmd`，它先安装依赖（`uv sync`）再启动程序。参数会原样传给程序，所以也可以 `start.cmd --check`。
 
-## 📚 文档
+或者手动执行：
 
-- **[🎮 事件系统文档](doc/event-system.md)** - 完整的Maicraft-Mai事件驱动架构指南
-  - 支持14种Minecraft原生事件类型
-  - 智能中断机制和AI驱动响应
-  - 并发安全的事件处理和存储
-  - 模块化设计和扩展方式
-
-## 🚀 快速开始
-
-### 环境要求
-
-- Python 3.11+
-- Minecraft 服务器
-
-### 安装步骤
-
-1. **克隆仓库**
 ```bash
-git clone https://github.com/MaiM-with-u/Maicraft
-cd Maicraft
+uv sync
+uv run maicraft            # 常驻运行，Ctrl+C 退出
+uv run maicraft --check    # 连一次 mod，打印握手信息与角色、目标、技能概况后退出
+uv run maicraft --version  # 打印版本号
+uv run maicraft --config 其他路径.toml  # 指定配置文件，默认用运行目录下的 config.toml
 ```
 
-2. **安装依赖**
-```bash
-pip install -r requirements.txt
-```
+第一次运行时，程序会从 `config-template.toml` 复制生成 `config.toml`。运行前必须先填 `[llm]` 里的模型和 API key。之后模板更新时，程序会升级旧配置文件（先备份，保留你的设置和注释）。
 
-3. **配置设置**
+## 配置
 
-复制配置模板，将`config-template.toml`复制并更名为`config.toml`
+配置文件是 TOML 格式，逐段说明（字段含义也写在模板的注释里）：
 
-在 `config.toml` 文件中配置以下参数：
+- `[llm]`：调用的模型。`model`（模型名称）、`api_key`（API 密钥，必须自己填）、`base_url`（API 地址，留空用服务方默认）、`temperature`、`max_tokens`、`supports_vision`（模型能不能看图；不能时画面只取旁边的文字）、`request_timeout_s`。
+- `[mod]`：与 mod 的连接。`url`（mod 的 MCP 端点地址，默认 `http://127.0.0.1:8766/mcp`）、`events_wait_ms`（事件长轮询的单次等待毫秒数）。
+- `[agent]`：agent 行为。`max_steps_per_turn`（一轮对话里最多执行的动作步数）、`idle_replan_minutes`（空闲多少分钟后主动叫醒模型，0 表示不叫醒）、`max_empty_turns`（连续多少轮没有实际动作后停下）、`long_term_goal`（长期目标，原样放进提示词）、`keep_recent_results`（提示词里保留最近几条动作结果）。
+- `[chat]`：公屏聊天。`mention_names`（除角色名之外还接受哪些称呼）、`batch_window_ms`（把相邻消息合并处理的等待毫秒数）。
+- `[maigo]`：MaiGO 共享记忆服务的对接。目前只定义了接口，还没有接入；`enabled = true` 时程序会打一条警告并按未启用运行。
 
-```toml
-[llm]
-model = "gpt-4o-mini"
-api_key = "your-openai-api-key"
-base_url = "https://api.openai.com/v1"
-temperature = 0.2
-max_tokens = 1024
+另有 `[logging]`（日志级别、日志文件等）和 `[inner]`（配置格式版本，不要手动改）两段，一般不用动。
 
-[agent]
-enabled = true
-session_id = "maicraft_default"
-max_steps = 50
-tick_seconds = 8.0
-report_each_step = true
+## 运行时会生成的文件
 
-[logging]
-level = "INFO"
-```
+都在运行目录下：
 
-1. **配置服务器**
-将`mcp_server/mcp_servers_template.json`复制并更名为`mcp_server/mcp_servers.json`
+- `config.toml`：你的配置文件（第一次运行时从模板生成）。
+- `logs/`：日志文件。
+- `data/notes/`：模型写给自己的笔记和待办，按 Minecraft 存档分开，一个存档一个 JSON 文件。
+- `usage/`：模型用量记录，一个模型一个 JSON 文件，含 token 数和按内置价格表估算的费用。
 
-编辑maicraft-mcp的配置文件，设置你的Minecraft服务器信息
-```json
-{
-  "mcpServers": {
-    "maicraft": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "maicraft@latest",
-        "--host",
-        "你的Minecraft服务器地址",     // 例如: "mc.example.com" 或 "192.168.1.100"
-        "--port",
-        "你的Minecraft服务器端口",     // 例如: "25565" (默认端口)
-        "--username",
-        "你的游戏用户名",              // 例如: "MaiBot"
-        "--auth",
-        "offline"                     // 离线模式，或使用 "online" 进行正版验证
-      ]
-    }
-  }
-}
-```
-#### 配置参数说明
-- `--host`: Minecraft服务器地址 (IP地址或域名)
-- `--port`: 服务器端口 (默认25565)
-- `--username`: 游戏用户名
-- `--auth`: 认证模式 (`offline` 为离线模式，`online` 为正版验证)
+## 它怎么工作
 
-5. **启动系统**
-```bash
-# Windows
-start.cmd
+程序通过 mod 内嵌的 MCP 端点连到游戏，用长轮询读两条事件流：角色事件流和游戏公屏事件流。以下情况会叫醒模型跑一轮对话：
 
-# Linux/Mac
-./start.sh
+- 角色身上发生了它自己处理不了的事（身体需求没人管、死亡），或计时到点；
+- 模型下达的目标提问、被暂停、结束或长时间停滞；
+- 公屏上有私聊或点名（原话里出现角色名或配置的称呼）的消息；其余公屏消息只进最近的聊天记录，不叫醒模型；
+- 空闲超过 `idle_replan_minutes` 分钟时主动叫醒，让模型重新想想做什么。
 
-# 或者直接运行
-python main.py
-```
+一轮对话里，模型可以调用 mod 的四个工具：`observe`（看自己和周围）、`lookup`（查能力与资料）、`execute`（下达目标）、`goal`（查看与管理目标），以及程序自己提供的三个本地工具：`notes`（读写笔记和待办）、`read_skill`（读 mod 发布的技能正文）、`recall`（取回之前被收起的工具结果原文）。工具结果太长时在提示词里换成占位，原文按编号留着，模型可以用 `recall` 取回。
 
-## Web UI
+给模型看的完整提示词在 `src/maicraft/agent/prompts/system.md`。
 
-[maicraft-web-ui](https://github.com/ChangingSelf/maicraft-web-ui)提供了一个简单的 Web UI，用于调试本项目
+## 旧版本
 
+基于 mineflayer 的旧实现固定在 tag `mineflayer-legacy`，不再维护。
 
-## 🤝 贡献指南
+## 许可证
 
-我们欢迎所有形式的贡献！
-
-1. Fork 项目
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 开启 Pull Request
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
-
-## 🙏 致谢
-
-- Minecraft 开发团队
-- Mineflayer
-- 所有贡献者和用户
-
-
-## 📞 联系方式
-
-- 项目主页: [GitHub](https://github.com/MaiToTheGate/Maicraft-Mai)
-- 问题反馈: [Issues](https://github.com/MaiToTheGate/Maicraft-Mai/issues)
-- 讨论交流: [Discussions](https://github.com/MaiToTheGate/Maicraft-Mai/discussions)
-
----
-
-**注意**: 这是一个实验性项目，请在使用前仔细阅读文档并测试功能。建议在测试环境中使用，避免影响正式的游戏存档。
+[MIT](LICENSE)
