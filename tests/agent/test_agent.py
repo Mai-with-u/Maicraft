@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from maicraft.agent.agent import Agent
-from maicraft.agent.mod_protocol import LOOKUP, reply_of
+from maicraft.agent.mod_protocol import LOOKUP, no_reply, reply_of
 from maicraft.agent.notes import Notes
 from maicraft.config import MaicraftConfig
 from maicraft.mod_client import ModUnavailable
@@ -438,6 +438,37 @@ async def test_prepare_failure_backs_off_between_reconnects(tmp_path: Path) -> N
         lookup_fail["flag"] = False
         await until(lambda: harness.llm.call_count >= 1, tries=20000)
         assert harness.agent._connect_failures == 0
+    finally:
+        await harness.stop()
+
+
+async def test_turn_material_no_reply_is_treated_as_disconnect(tmp_path: Path) -> None:
+    """每轮资料里 goal(list) 根本没拿到回复时按断线处理：这一轮不调模型，恢复后内容照常交给模型。"""
+    clock = ManualClock()
+    mod = FakeMod(clock=clock)
+    goal_down = {"flag": False}
+
+    async def call(name: str, arguments: dict[str, Any]) -> Any:
+        if goal_down["flag"] and name == "goal" and arguments.get("operation") == "list":
+            # 先让出事件循环再回 no_reply：模拟真实往返，不让调用方在无让出的协程里连续循环
+            await asyncio.sleep(0)
+            return no_reply("没有拿到回复")
+        return reply_of(await mod.invoke(name, arguments))
+
+    harness = Harness(tmp_path, mod=mod, call=call)
+    harness.start()
+    try:
+        await until(lambda: harness.llm.call_count >= 1)
+        await pump(30)
+        # 这一轮的每轮资料读不到目标清单：不调模型、按断线处理
+        goal_down["flag"] = True
+        harness.mod.body_event("timer_due", "计时到点：看看炉子")
+        await pump(200)
+        assert harness.llm.call_count == 1
+        # 恢复后重连，积压的内容随下一轮交给模型
+        goal_down["flag"] = False
+        await until(lambda: harness.llm.call_count >= 2, tries=20000)
+        assert "计时到点：看看炉子" in all_user_text(harness.llm, start=1)
     finally:
         await harness.stop()
 

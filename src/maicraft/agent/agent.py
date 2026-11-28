@@ -472,10 +472,18 @@ class Agent:
         return lines
 
     async def _turn_material(self) -> str:
-        """每轮资料：角色此刻的样子、目标清单、笔记、技能目录、长期目标、记忆背景。"""
+        """每轮资料：角色此刻的样子、目标清单、笔记、技能目录、长期目标、记忆背景。
+
+        两次读取根本没拿到回复（no_reply）时按断线处理，与同一轮里重建开局资料断线的
+        做法一致：标记断线、这一轮不调模型，积压的内容留在队列里。
+        """
         self_reply = await self._call(OBSERVE, {"what": "self"})
+        if self_reply.error_code == NO_REPLY:
+            raise ModUnavailable("读自己没有拿到回复")
         self._absorb_self_reply(self_reply)
         goals_reply = await self._call(GOAL, {"operation": "list"})
+        if goals_reply.error_code == NO_REPLY:
+            raise ModUnavailable("读目标清单没有拿到回复")
         sections = [
             "### 自己此刻（observe what=self）\n" + json_text(self_reply.raw),
             "### 目标清单（goal operation=list）\n" + json_text(goals_reply.raw),
