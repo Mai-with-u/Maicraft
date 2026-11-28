@@ -27,7 +27,7 @@ from maicraft.config import ConfigError, MaicraftConfig, load_config
 from maicraft.mod_client import ModClient, ModUnavailable
 from maicraft.openai_client.llm_request import LLMClient
 from maicraft.openai_client.modelconfig import ModelConfig
-from maicraft.utils.logger import get_logger, setup_advanced_logging
+from maicraft.utils.logger import configure_from_config, get_logger
 
 logger = get_logger("Main")
 
@@ -150,17 +150,7 @@ def main(argv: list[str] | None = None) -> int:
         # 配置无法使用（缺模板、校验不通过）：把中文说明打到标准错误，非零退出
         print(str(exc), file=sys.stderr)
         return 1
-    logging_config = config.logging
-    setup_advanced_logging(
-        level=logging_config.level,
-        enable_json=logging_config.enable_json,
-        log_to_file=logging_config.log_to_file,
-        log_dir=logging_config.log_dir,
-        rotation=logging_config.rotation,
-        retention=logging_config.retention,
-        enable_hierarchical_logging=logging_config.enable_hierarchical_logging,
-        max_recent_logs=logging_config.max_recent_logs,
-    )
+    configure_from_config(config.logging.model_dump())
 
     if args.check:
         return run_check(config)
