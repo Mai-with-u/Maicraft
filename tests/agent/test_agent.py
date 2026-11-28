@@ -809,7 +809,8 @@ async def test_world_switch_rebuild_failing_midway_does_not_kill_agent(tmp_path:
     （``_turn_material`` 只调 observe(self) 和 goal(list)，没有 lookup），否则这条回归测试
     在"重建块不在 try 里"的旧代码上也能通过。做法：换存档后布防，假件见到布防后的
     第一个 lookup（开局资料的第 3 次调用）起抛 ``ModUnavailable``，恢复前一直断着；
-    断线时挂起一小段虚拟时间再失败，让重连环不独占事件循环。
+    断线时靠假件里的两次 ``await asyncio.sleep(0)`` 让出事件循环，重连环里等在别处的
+    任务能被调度到，不至于让重连环独占事件循环。
     """
     clock = ManualClock()
     mod = FakeMod(clock=clock)
