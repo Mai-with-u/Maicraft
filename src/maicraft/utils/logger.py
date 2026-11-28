@@ -24,7 +24,7 @@ class LoggerManager:
         self,
         level: str = "INFO",
         enable_json: bool = False,
-        log_to_file: bool = True,
+        log_to_file: bool = False,
         log_dir: str = "logs",
         rotation: str = "10 MB",  # 改为按大小轮转，更适合高频日志
         retention: str = "3 days",  # 缩短保留时间
@@ -34,6 +34,10 @@ class LoggerManager:
     ) -> None:
         """
         配置日志管理器
+
+        默认只挂控制台输出，不建目录、不写文件：模块顶层取 logger 就会触发默认初始化，
+        不能让 ``--version`` 或仅仅导入模块就在运行目录创建 logs 目录。文件输出只在显式
+        调用 ``setup_advanced_logging``（且 log_to_file 为真）时才挂。
 
         Args:
             level: 日志级别
@@ -181,7 +185,8 @@ class LoggerManager:
     def get_logger(self, name: str):
         """获取绑定了模块名的logger"""
         if not self._initialized:
-            self.configure()  # 使用默认配置初始化
+            # 默认配置只挂控制台输出：模块顶层取 logger 就会触发这里，不能在运行目录建文件
+            self.configure()
         return _logger.bind(module=name)
 
     def set_level(self, level: str) -> None:
