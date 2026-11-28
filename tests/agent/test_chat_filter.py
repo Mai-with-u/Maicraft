@@ -70,6 +70,32 @@ def test_mention_match_is_case_insensitive_on_text() -> None:
     assert chat_filter.next_wake_delay_ms() == 2000
 
 
+def test_mention_list_with_wake_name_wakes_even_without_text_match() -> None:
+    """游戏 @ 功能的 UUID 式点名：原话里没有角色名，但 mentions 里有，也算点名。"""
+    clock = FakeClock()
+    chat_filter = make_filter(clock, names=("Mai",))
+    chat_filter.add(player(1, "Alex", "你过来看看这个", mentions=("Mai",)))
+
+    assert chat_filter.next_wake_delay_ms() == 2000
+
+
+def test_mention_list_with_someone_else_does_not_wake() -> None:
+    clock = FakeClock()
+    chat_filter = make_filter(clock, names=("Mai",))
+    chat_filter.add(player(1, "Alex", "你过来看看这个", mentions=("Steve",)))
+
+    assert chat_filter.next_wake_delay_ms() is None
+
+
+def test_mention_entry_without_name_is_ignored() -> None:
+    """mentions 项可以缺 name：不崩、不叫醒。"""
+    clock = FakeClock()
+    chat_filter = make_filter(clock, names=("Mai",))
+    chat_filter.add(player(1, "Alex", "你过来看看这个", mentions=("",)))
+
+    assert chat_filter.next_wake_delay_ms() is None
+
+
 # ---------------------------------------------------------------------------
 # 合批：窗口、条数上限、私聊在前、同人折叠
 # ---------------------------------------------------------------------------

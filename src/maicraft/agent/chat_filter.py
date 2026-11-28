@@ -197,11 +197,17 @@ class ChatFilter:
         self._recent.clear()
 
     def _should_wake(self, message: ChatMessage) -> bool:
-        """私聊或原话里出现角色名字 / 配置称呼（大小写不敏感）算点名。"""
+        """私聊算点名；原话里出现角色名字 / 配置称呼，或事件自带的点名名单里有角色名字，也算点名。
+
+        ``mentions`` 是游戏 @ 功能给出的名单，原话文本里未必有名字（UUID 式点名），
+        所以除了文本匹配也看它；名单匹配与文本匹配同用一套归一化口径。
+        """
         if message.private:
             return True
         text = _content_key(message.text)
-        return bool(text) and any(name in text for name in self._names)
+        if text and any(name in text for name in self._names):
+            return True
+        return any(name in _content_key(mention) for mention in message.mentions for name in self._names)
 
     def _compute_batch_due_ms(self, now: int) -> int:
         """计算合批窗口的到点时刻：常态为窗口宽，冷却期内至少推到冷却结束。"""
