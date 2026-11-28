@@ -98,11 +98,6 @@ class WorldIdentity:
         """眼下认出的存档；不明或旧版 mod 为 None。"""
         return self._current
 
-    @property
-    def online_mode(self) -> OnlineMode:
-        """眼下这个存档的服务器验不验账号；不明或旧版 mod 为 unknown。"""
-        return self._current.online_mode if self._current is not None else "unknown"
-
     def absorb(self, data: Mapping[str, Any]) -> WorldChange | None:
         """喂入一页 ``events`` 的 data；认出了新的存档时返回变化。
 
@@ -121,16 +116,6 @@ class WorldIdentity:
             self._current = None
             return None
         self._legacy = False
-        return self._take(data.get("world"))
-
-    def absorb_observation(self, data: Mapping[str, Any]) -> WorldChange | None:
-        """喂入一次 ``observe(self)`` 的 data：只更新眼下的存档，不判是不是旧版 mod。
-
-        mod 在世界里时 ``observe(self)`` 一定带 ``world``；万一某次回复缺了这个键，
-        按"这次没说"跳过，不把已经认出的存档退回不分存档、等下一页事件页再翻回来。
-        """
-        if "world" not in data:
-            return None
         return self._take(data.get("world"))
 
     def _take(self, raw: Any) -> WorldChange | None:

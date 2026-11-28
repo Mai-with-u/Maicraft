@@ -1,7 +1,6 @@
-"""mod 报的实例能力清单、连锁挖矿统计与取材留坑回填事实。
+"""目标结果里的连锁挖矿统计与取材留坑回填事实。
 
-解析 ``observe(what=self)`` 可选的 ``mod_features``、``last_chain_mining``，以及
-``obtain`` / ``gather`` 目标结果 ``details`` 里的 ``chain_mining`` 与 ``pits``：
+解析 ``obtain`` / ``gather`` 目标结果 ``details`` 里的 ``chain_mining`` 与 ``pits``：
 - mod 还没报对应字段时一律返回 ``None``，调用方不输出空键、不报错；
 - 格式化结果控制在单行短句，不进一句话现场，避免挤占血量与敌情的核心空间。
 """
@@ -11,21 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-__all__ = ["chain_mining_text", "goal_mining_and_pits_notes", "mod_features_text", "pits_text"]
-
-# mod 报的实例能力代号 → 中文短名（未知新代号原样保留，向后兼容）
-_MOD_FEATURE_NAMES: dict[str, str] = {
-    "chain_mining": "连锁破坏",
-    "lootr": "独立战利品箱",
-    "create": "机械动力",
-    "ae2": "应用能源2",
-    "appmek": "应用机械",
-    "mekanism": "通用机械",
-    "sophisticated_backpacks": "精妙背包",
-    "touhou_little_maid": "车万女仆",
-    "ftb_quests": "FTB任务书",
-    "sable": "Sable载具",
-}
+__all__ = ["chain_mining_text", "goal_mining_and_pits_notes", "pits_text"]
 
 # 备注里可能带的括号坐标，拼进短句前剥掉，不念一串坐标数字
 _PARENTHESIZED_COORDINATES = re.compile(
@@ -49,29 +34,8 @@ def _clean_note(raw: Any) -> str:
     return f"{stripped[:_NOTE_MAX_CHARS]}…"
 
 
-def mod_features_text(data: dict[str, Any]) -> str | None:
-    """``observe(what=self)`` 顶层 ``mod_features`` → 一行中文能力清单；mod 没报该字段时返回 ``None``。"""
-    if not isinstance(data, dict) or "mod_features" not in data:
-        return None
-    raw = data.get("mod_features")
-    if not isinstance(raw, list):
-        return None
-    # 角色进世界后 mod 报空数组表示当前世界没有任何额外联动就绪，明写"无额外联动"供被问起时如实答
-    if not raw:
-        return "无额外联动"
-    labels: list[str] = []
-    for item in raw:
-        if not isinstance(item, str) or not item.strip():
-            continue
-        key = item.strip()
-        label = _MOD_FEATURE_NAMES.get(key, key)
-        if label not in labels:
-            labels.append(label)
-    return "、".join(labels) if labels else "无额外联动"
-
-
 def chain_mining_text(raw: Any) -> str | None:
-    """``last_chain_mining`` 或 ``details.chain_mining`` → 一行连锁统计短句；未报或格式不符时返回 ``None``。"""
+    """``details.chain_mining`` → 一行连锁统计短句；未报或格式不符时返回 ``None``。"""
     if not isinstance(raw, dict):
         return None
     batches = _int_or_none(raw.get("chained_batches"))

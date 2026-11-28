@@ -36,7 +36,7 @@ src/maicraft/
 │   ├── skills.py            # mod 发布的技能：从 MCP 资源清单认出 skill:// 资源，按名字读正文
 │   ├── memory_service.py    # 共享记忆服务（MaiGO）的接口与空实现；接入还没实现
 │   ├── world_identity.py    # 从 mod 报的 world 认出当前 Minecraft 存档，判定"换了存档"
-│   ├── mod_facts.py         # 解析 mod 报的实例能力、连锁挖矿统计与取材留坑回填事实
+│   ├── mod_facts.py         # 解析目标结果里的连锁挖矿统计与取材留坑回填事实
 │   └── prompts/system.md    # 给模型看的系统提示词
 ├── openai_client/
 │   ├── llm_request.py       # 调用 OpenAI 兼容接口：单次请求、重试、图片处理

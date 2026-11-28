@@ -1,4 +1,4 @@
-"""认出所在存档：旧版 mod 不分存档、主菜单不算换、观察只更新不判定、账号验证不猜。"""
+"""认出所在存档：旧版 mod 不分存档、主菜单不算换、账号验证不猜。"""
 
 from __future__ import annotations
 
@@ -48,27 +48,6 @@ def test_main_menu_and_reentering_same_world_is_not_a_switch() -> None:
     assert change.after.label() == "新的世界"
 
 
-def test_observation_updates_save_but_never_decides_old_mod() -> None:
-    """observe(self) 只更新眼下的存档：某次回复缺 world 键不算旧版 mod，已认出的存档不退回不分。"""
-    identity = WorldIdentity()
-    identity.absorb(_world("aaa", "老家"))
-
-    assert identity.absorb_observation({"name": "角色"}) is None
-    assert not identity.legacy
-    assert identity.current == WorldRef(id="aaa", name="老家")
-
-    change = identity.absorb_observation(_world("bbb", "新的世界"))
-    assert change is not None and change.switched
-    assert identity.current == WorldRef(id="bbb", name="新的世界")
-
-    # 事件页说没有 world 键才是旧版 mod；之后 observe(self) 带着 world 也不翻回来
-    old_mod = WorldIdentity()
-    old_mod.absorb({"stream_id": "s"})
-    old_mod.absorb_observation(_world("bbb", "新的世界"))
-    assert old_mod.legacy
-    assert old_mod.current == WorldRef(id="bbb", name="新的世界"), "观察照常更新，只是判不出旧版与否"
-
-
 def test_page_missing_world_after_seeing_it_means_not_in_world() -> None:
     """见过带 world 的页之后，某页缺了这个键：mod 不在世界里时 world 为 null、Gson 不写 null 字段，
     按不在世界里处理（存档不明），不退回旧版 mod；重进同一个存档不算换，进别的存档照常算换。"""
@@ -114,9 +93,3 @@ def test_online_mode_is_read_and_never_guessed() -> None:
     reads = [world_ref_of({"id": "w1", "online_mode": raw}) for raw in ("on", "off", "unknown", "OFF", None)]
     assert [ref.online_mode for ref in reads if ref is not None] == ["on", "off", "unknown", "unknown", "unknown"]
     assert world_ref_of({"id": "w1"}) == WorldRef(id="w1", online_mode="unknown")
-    identity = WorldIdentity()
-    assert identity.online_mode == "unknown"
-    assert identity.absorb({"world": {"id": "w1", "online_mode": "off"}}) is not None
-    assert identity.online_mode == "off"
-    assert identity.absorb({"world": {"id": "w1", "online_mode": "on"}}) is None, "同一个存档不算换"
-    assert identity.online_mode == "on"

@@ -1,31 +1,10 @@
-"""mod 报的事实短句：四个函数各覆盖"没报这个字段""报了空值""报了正常值"。"""
+"""mod 报的事实短句：各函数覆盖"没报这个字段""报了空值""报了正常值"。"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from maicraft.agent.mod_facts import chain_mining_text, goal_mining_and_pits_notes, mod_features_text, pits_text
-
-# ---------------------------------------------------------------------------
-# mod_features_text
-# ---------------------------------------------------------------------------
-
-
-def test_mod_features_missing_field_is_none() -> None:
-    assert mod_features_text({"position": {}}) is None
-    assert mod_features_text({}) is None
-
-
-def test_mod_features_empty_value_says_no_integration() -> None:
-    assert mod_features_text({"mod_features": []}) == "无额外联动"
-    assert mod_features_text({"mod_features": "不是列表"}) is None, "格式不符时按没报处理"
-    assert mod_features_text({"mod_features": ["", "  "]}) == "无额外联动"
-
-
-def test_mod_features_normal_value_is_one_line() -> None:
-    text = mod_features_text({"mod_features": ["chain_mining", "create", "chain_mining", "future_mod"]})
-    assert text == "连锁破坏、机械动力、future_mod", "未知代号原样保留，重复的只报一次"
-
+from maicraft.agent.mod_facts import chain_mining_text, goal_mining_and_pits_notes, pits_text
 
 # ---------------------------------------------------------------------------
 # chain_mining_text
