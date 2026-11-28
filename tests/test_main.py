@@ -148,3 +148,16 @@ def test_main_version_prints_unknown_without_package_metadata(
     assert main(["--version"]) == 0
 
     assert capsys.readouterr().out.strip() == "unknown"
+
+
+def test_main_version_and_help_create_no_files(tmp_path, monkeypatch):
+    """--version 与 --help 在加载配置、初始化日志之前就处理完：运行目录不出现新文件、不读 config.toml。"""
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["--version"]) == 0
+
+    with pytest.raises(SystemExit) as excinfo:
+        main(["--help"])
+    assert excinfo.value.code == 0
+
+    assert not list(tmp_path.iterdir()), "运行目录里不应出现任何新文件"
