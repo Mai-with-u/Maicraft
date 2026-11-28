@@ -371,7 +371,10 @@ def load_config(path: str | os.PathLike[str] | None = None) -> MaicraftConfig:
         # 用户配置的版本号读不出来（缺 [meta]（旧文件里是 [inner]）、缺 version、不是合法版本号）而模板在位时，
         # 也按模板升级路径处理一次：备份、去掉模板里没有的段和键、补上缺的、保留用户已有的值
         if template_version and (config_version is None or _compare_versions(template_version, config_version)):
-            logger.info(f"[配置更新] 检测到模板版本更新: {config_version} -> {template_version}")
+            if config_version is None:
+                logger.info(f"[配置更新] 旧配置读不到格式版本，按模板升级到 {template_version}")
+            else:
+                logger.info(f"[配置更新] 检测到模板版本更新: {config_version} -> {template_version}")
             _update_config_from_template(str(config_path), str(template))
 
     with open(config_path, "rb") as f:

@@ -288,8 +288,23 @@ def test_missing_template_reports_a_readable_error(tmp_path, monkeypatch):
     assert "config.toml" in message
 
 
-def test_upgrade_runs_when_user_version_is_unreadable(template_dir):
+def test_upgrade_runs_when_user_version_is_unreadable(template_dir, monkeypatch):
     """用户配置缺 [inner] 或版本号不合法而模板在位：按现有升级路径处理一次。"""
+
+    class RecordingLogger:
+        """把日志消息存进列表的替身，不依赖真实日志模块。"""
+
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        def info(self, message: str) -> None:
+            self.messages.append(message)
+
+        def error(self, message: str) -> None:
+            self.messages.append(message)
+
+    recording = RecordingLogger()
+    monkeypatch.setattr(maicraft.config, "get_logger", lambda name: recording)
     for version_line in ('[inner]\nversion = "not-a-version"\n', ""):
         old_config = (
             version_line
@@ -309,6 +324,11 @@ level = "DEBUG"
         (template_dir / "config.toml").write_text(old_config, encoding="utf-8")
 
         config = load_config()
+
+        joined = "\n".join(recording.messages)
+        assert "旧配置读不到格式版本，按模板升级到 0.4.0" in joined, "版本号读不出时用单独的提示语"
+        assert "检测到模板版本更新" not in joined, "没有 None 被拼进版本对比的提示语"
+        recording.messages.clear()
 
         assert isinstance(config, MaicraftConfig)
         assert (template_dir / "config.toml.backup").exists(), "升级前留备份"
