@@ -222,6 +222,37 @@ def test_upgrade_from_030_template_keeps_user_values(template_dir):
     assert config.meta.version == "0.4.0"
 
 
+def test_upgrade_log_does_not_leak_secret_values(template_dir, monkeypatch):
+    """升级日志里保留用户设置时，密钥类键（键名含 key/token/secret/password）只写占位，不输出取值。"""
+
+    class RecordingLogger:
+        """把日志消息存进列表的替身，不依赖真实日志模块。"""
+
+        def __init__(self) -> None:
+            self.messages: list[str] = []
+
+        def info(self, message: str) -> None:
+            self.messages.append(message)
+
+        def error(self, message: str) -> None:
+            self.messages.append(message)
+
+    recording = RecordingLogger()
+    monkeypatch.setattr(maicraft.config, "get_logger", lambda name: recording)
+    secret = "sk-user-key-1234567890"
+    old_config = TEMPLATE_030.replace('rotation = "1 day"', 'rotation = "5 MB"').replace(
+        'api_key = ""', f'api_key = "{secret}"'
+    )
+    (template_dir / "config.toml").write_text(old_config, encoding="utf-8")
+
+    load_config()
+
+    joined = "\n".join(recording.messages)
+    assert secret not in joined, "密钥取值不得出现在任何日志消息里"
+    assert "llm.api_key = 已设置（不显示）" in joined
+    assert "logging.rotation = 5 MB" in joined, "不敏感的保留设置照旧输出取值"
+
+
 def test_no_upgrade_when_template_version_not_higher(template_dir):
     config_text = PACKAGE_TEMPLATE.read_text(encoding="utf-8")
     (template_dir / "config.toml").write_text(config_text, encoding="utf-8")

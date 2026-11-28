@@ -3,7 +3,7 @@
 import os
 import shutil
 import tomllib as tomli
-from importlib.resources import as_file, files
+from importlib.resources import files
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
@@ -119,9 +119,7 @@ class MaicraftConfig(BaseModel):
 
 def template_path() -> Path:
     """包内自带的配置模板；装成 wheel 之后也在包里"""
-    traversable = files("maicraft").joinpath("config-template.toml")
-    with as_file(traversable) as path:
-        return path
+    return Path(str(files("maicraft").joinpath("config-template.toml")))
 
 
 def _get_version_from_toml(toml_path: str) -> Optional[str]:
@@ -153,6 +151,12 @@ def _parse_toml_with_comments(file_path: str) -> tuple[Dict[str, Any], str]:
         data = tomli.load(f)
 
     return data, content
+
+
+def _is_sensitive_key(key: str) -> bool:
+    """键名含密钥类词（key、token、secret、password）时视为敏感，日志里不输出取值"""
+    lowered = key.lower()
+    return any(word in lowered for word in ("key", "token", "secret", "password"))
 
 
 def _update_config_from_template(config_path: str, template_path_str: str) -> None:
@@ -193,7 +197,10 @@ def _update_config_from_template(config_path: str, template_path_str: str) -> No
                         and not (section == "meta" and key == "version")
                     ):
                         merged_data[section][key] = existing_data[section][key]
-                        logger.info(f"[配置更新] 保留用户设置: {section}.{key} = {existing_data[section][key]}")
+                        if _is_sensitive_key(key):
+                            logger.info(f"[配置更新] 保留用户设置: {section}.{key} = 已设置（不显示）")
+                        else:
+                            logger.info(f"[配置更新] 保留用户设置: {section}.{key} = {existing_data[section][key]}")
                     else:
                         merged_data[section][key] = template_value
             else:
@@ -361,7 +368,7 @@ def load_config(path: str | os.PathLike[str] | None = None) -> MaicraftConfig:
     else:
         template_version = _get_version_from_toml(str(template))
         config_version = _get_version_from_toml(str(config_path))
-        # 用户配置的版本号读不出来（缺 [inner]、缺 version、不是合法版本号）而模板在位时，
+        # 用户配置的版本号读不出来（缺 [meta]（旧文件里是 [inner]）、缺 version、不是合法版本号）而模板在位时，
         # 也按模板升级路径处理一次：备份、去掉模板里没有的段和键、补上缺的、保留用户已有的值
         if template_version and (config_version is None or _compare_versions(template_version, config_version)):
             logger.info(f"[配置更新] 检测到模板版本更新: {config_version} -> {template_version}")
