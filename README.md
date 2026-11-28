@@ -27,7 +27,7 @@ uv run maicraft --version  # 打印版本号
 uv run maicraft --config 其他路径.toml  # 指定配置文件，默认用运行目录下的 config.toml
 ```
 
-第一次运行时，程序会从 `config-template.toml` 复制生成 `config.toml`。运行前必须先填 `[llm]` 里的模型和 API key。之后模板更新时，程序会升级旧配置文件（先备份，保留你的设置和注释）。目前请在仓库目录里运行：配置模板在仓库根目录，没有打进安装包。从旧版本升级时，旧配置会自动迁移，原文件留有 `config.toml.backup` 备份。
+第一次运行时，程序会从随程序打包的 `config-template.toml` 复制生成 `config.toml`，所以在任意目录都能运行。运行前必须先填 `[llm]` 里的模型和 API key。之后模板更新时，程序会升级旧配置文件（先备份，保留你的设置和注释；模板里没有的旧段和旧字段会被去掉）。从旧版本升级时，原文件留有 `config.toml.backup` 备份。
 
 ## 配置
 
@@ -39,14 +39,17 @@ uv run maicraft --config 其他路径.toml  # 指定配置文件，默认用运�
 - `[chat]`：公屏聊天。`mention_names`（除角色名之外还接受哪些称呼）、`batch_window_ms`（把相邻消息合并处理的等待毫秒数）。
 - `[maigo]`：MaiGO 共享记忆服务的对接。目前只定义了接口，还没有接入；`enabled = true` 时程序会打一条警告并按未启用运行。
 
-另有 `[logging]`（日志级别、日志文件等）和 `[inner]`（配置格式版本，不要手动改）两段，一般不用动。
+另有 `[logging]` 和 `[meta]` 两段，一般不用动：
+
+- `[logging]`：日志。`enabled`（是否写日志文件）、`format`（文件里每行是纯文本 `text` 还是一个 JSON 对象 `jsonl`）、`directory`（日志目录，相对运行目录）、`level`（写进文件的最低级别，`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL` 之一）、`console_level`（控制台的最低级别）、`rotation`（单个文件多大时轮转，如 `"10 MB"`）、`retention`（轮转出的旧文件保留多久，如 `"7 days"`）、`compression`（旧文件的压缩格式，如 `"zip"`）。
+- `[meta]`：配置格式版本，由升级流程自动推进，不要手动改。
 
 ## 运行时会生成的文件
 
 都在运行目录下：
 
 - `config.toml`：你的配置文件（第一次运行时从模板生成）。
-- `logs/`：日志文件。
+- `logs/`：一个按大小轮转的日志文件 `maicraft_<时间>.log`，轮转出的旧文件压缩保留。
 - `data/notes/`：模型写给自己的笔记和待办，按 Minecraft 存档分开，一个存档一个 JSON 文件。
 - `usage/`：模型用量记录，一个模型一个 JSON 文件，含 token 数和按内置价格表估算的费用。
 

@@ -7,9 +7,83 @@ import pytest
 from pydantic import ValidationError
 
 import maicraft.config
-from maicraft.config import ConfigError, MaicraftConfig, load_config
+from maicraft.config import ConfigValidationError, MaicraftConfig, load_config
 
 PACKAGE_TEMPLATE = Path(__file__).resolve().parents[1] / "src" / "maicraft" / "config-template.toml"
+
+# 0.3.0 格式的完整配置样本（改动前的模板内容），用来验证旧配置的升级
+TEMPLATE_030 = """\
+# Maicraft配置模板
+[inner]
+# 配置格式的版本，只用来和模板比较，不要手动改
+version = "0.3.0"
+
+[logging]
+# 日志级别，可选: TRACE, DEBUG, INFO, SUCCESS, WARNING, ERROR, CRITICAL
+level = "INFO"
+# 是否启用JSON Lines格式文件输出（控制台始终为彩色格式）
+enable_json = false
+# 是否输出日志到文件
+log_to_file = true
+# 日志目录
+log_dir = "logs"
+# 日志轮转策略（如"1 day", "100 MB"）
+rotation = "1 day"
+# 日志保留策略（如"7 days", "10 files"）
+retention = "7 days"
+# 是否启用层次化日志记录（不同级别输出到不同文件）
+enable_hierarchical_logging = true
+# 内存中保留的最近日志条数
+max_recent_logs = 1000
+
+[llm]
+# 模型名称
+model = "gpt-4o-mini"
+# API密钥
+api_key = ""
+# API基础URL，留空使用服务方默认地址
+base_url = ""
+# 温度参数，越高越发散
+temperature = 0.2
+# 单次回复的最大token数
+max_tokens = 4096
+# 模型能不能看图；false 时 mod 发来的画面只把旁边的文字给模型
+supports_vision = false
+# 单次模型请求的超时秒数
+request_timeout_s = 120.0
+
+[mod]
+# mod 的 MCP 端点地址
+url = "http://127.0.0.1:8766/mcp"
+# 事件长轮询的单次等待毫秒数
+events_wait_ms = 25000
+
+[agent]
+# 一轮对话里最多执行的动作步数
+max_steps_per_turn = 30
+# 空闲多少分钟后主动叫醒模型；0 表示不主动叫醒
+idle_replan_minutes = 10
+# 连续多少轮没有实际动作后停下
+max_empty_turns = 3
+# 长期目标，原样放进提示词
+long_term_goal = ""
+# 提示词里保留最近几条动作结果
+keep_recent_results = 6
+
+[chat]
+# 除角色名之外还接受哪些称呼
+mention_names = []
+# 把相邻消息合并处理的等待毫秒数
+batch_window_ms = 2000
+
+[maigo]
+# 是否启用 Maigo 对接
+enabled = false
+# Maigo 服务地址
+url = "http://127.0.0.1:8768"
+# 在 Maigo 里使用的分支标识
+branch_id = "maicraft"
+"""
 
 
 @pytest.fixture
@@ -109,6 +183,45 @@ level = "DEBUG"
     assert data["meta"]["version"] == "0.4.0"
 
 
+def test_upgrade_from_030_template_keeps_user_values(template_dir):
+    """0.3.0 格式的完整旧配置升级到 0.4.0：[inner] 和旧的 [logging] 字段被去掉，
+    新的 [meta] 和 [logging] 字段补上，同名键上用户已有的值保留，原文件留备份。"""
+    old_config = (
+        TEMPLATE_030.replace('level = "INFO"', 'level = "DEBUG"')
+        .replace('rotation = "1 day"', 'rotation = "5 MB"')
+        .replace('retention = "7 days"', 'retention = "3 days"')
+        .replace('api_key = ""', 'api_key = "sk-user-key"')
+    )
+    (template_dir / "config.toml").write_text(old_config, encoding="utf-8")
+
+    config = load_config()
+
+    assert isinstance(config, MaicraftConfig)
+    assert (template_dir / "config.toml.backup").exists(), "升级前留备份"
+    text = (template_dir / "config.toml").read_text(encoding="utf-8")
+    assert "[inner]" not in text, "旧版本段被去掉"
+    for old_field in ("enable_json", "log_to_file", "log_dir", "enable_hierarchical_logging", "max_recent_logs"):
+        assert old_field not in text, f"旧的日志字段 {old_field} 被去掉"
+    with open(template_dir / "config.toml", "rb") as f:
+        data = tomllib.load(f)
+    assert data["meta"] == {"version": "0.4.0"}
+    assert data["logging"] == {
+        "enabled": True,
+        "format": "text",
+        "directory": "logs",
+        "level": "DEBUG",
+        "console_level": "INFO",
+        "rotation": "5 MB",
+        "retention": "3 days",
+        "compression": "zip",
+    }
+    assert config.logging.level == "DEBUG"
+    assert config.logging.rotation == "5 MB"
+    assert config.logging.retention == "3 days"
+    assert config.llm.api_key == "sk-user-key"
+    assert config.meta.version == "0.4.0"
+
+
 def test_no_upgrade_when_template_version_not_higher(template_dir):
     config_text = PACKAGE_TEMPLATE.read_text(encoding="utf-8")
     (template_dir / "config.toml").write_text(config_text, encoding="utf-8")
@@ -134,7 +247,7 @@ def test_missing_template_reports_a_readable_error(tmp_path, monkeypatch):
     fake_template = tmp_path / "no-such" / "config-template.toml"
     monkeypatch.setattr(maicraft.config, "template_path", lambda: fake_template)
 
-    with pytest.raises(ConfigError) as excinfo:
+    with pytest.raises(ConfigValidationError) as excinfo:
         load_config()
 
     message = str(excinfo.value)
@@ -184,7 +297,7 @@ def test_validation_failure_lists_each_bad_field(template_dir):
     bad_config = text.replace("temperature = 0.2", "temperature = 5.0").replace("max_tokens = 4096", "max_tokens = 1")
     (template_dir / "config.toml").write_text(bad_config, encoding="utf-8")
 
-    with pytest.raises(ConfigError) as excinfo:
+    with pytest.raises(ConfigValidationError) as excinfo:
         load_config()
 
     message = str(excinfo.value)

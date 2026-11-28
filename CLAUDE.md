@@ -19,7 +19,7 @@ uv run maicraft              # 常驻运行
 ```
 src/maicraft/
 ├── main.py                  # 命令行入口：解析参数（--config / --check / --version）、组装各模块、常驻主循环与自检
-├── config.py                # 配置模型（pydantic）与配置文件加载：不存在就从 config-template.toml 创建，模板更新时升级旧文件
+├── config.py                # 配置模型（pydantic）与配置文件加载：配置模板打在包里，不存在就从包内模板创建，模板更新时升级旧文件
 ├── mod_client.py            # 连接 MaiCraftMod 内嵌的 MCP 端点：握手、会话、超时、断线后重连
 ├── agent/                   # 与 mod 打交道的协议层、状态层与事件跟踪
 │   ├── agent.py             # 主循环：读 mod 的事件，有必要时叫醒模型跑一轮，没事就挂着等
@@ -44,7 +44,7 @@ src/maicraft/
 │   ├── token_usage_manager.py  # token 用量记录：按模型落 JSON 文件，估算费用
 │   └── model_price.toml     # 用量费用估算用的价格表
 └── utils/
-    └── logger.py            # 基于 loguru 的日志：控制台彩色输出、日志文件与轮转
+    └── logger.py            # 基于 loguru 的日志：configure_from_config 按配置挂控制台与文件输出（轮转、保留、压缩），get_logger 给各模块返回带模块名标注的日志接口
 ```
 
 ## 约定

@@ -5,7 +5,7 @@ import shutil
 import tomllib as tomli
 from importlib.resources import as_file, files
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Literal, Optional
 
 from packaging import version
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from maicraft.utils.logger import get_logger
 
 
-class ConfigError(Exception):
+class ConfigValidationError(Exception):
     """配置文件无法使用：找不到模板、校验不通过等，异常消息是给用户看的中文说明。"""
 
 
@@ -30,14 +30,18 @@ class LoggingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    level: str = Field(default="INFO", description="日志级别")
-    enable_json: bool = Field(default=False, description="是否启用JSON Lines格式文件输出（控制台始终为彩色格式）")
-    log_to_file: bool = Field(default=True, description="是否输出日志到文件")
-    log_dir: str = Field(default="logs", description="日志目录")
-    rotation: str = Field(default="1 day", description="日志轮转策略（如'1 day', '100 MB'）")
-    retention: str = Field(default="7 days", description="日志保留策略（如'7 days', '10 files'）")
-    enable_hierarchical_logging: bool = Field(default=True, description="是否启用层次化日志记录")
-    max_recent_logs: int = Field(default=1000, ge=100, le=10000, description="内存中保留的最近日志条数")
+    enabled: bool = Field(default=True, description="是否写日志文件")
+    format: Literal["text", "jsonl"] = Field(default="text", description="文件里每行是纯文本，还是一个 JSON 对象")
+    directory: str = Field(default="logs", description="日志目录，相对运行目录")
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO", description="写进文件的最低级别"
+    )
+    console_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO", description="控制台的最低级别"
+    )
+    rotation: str = Field(default="10 MB", description="单个文件多大时轮转")
+    retention: str = Field(default="7 days", description="轮转出的旧文件保留多久")
+    compression: str = Field(default="zip", description="轮转出的旧文件的压缩格式")
 
 
 class LLMConfig(BaseModel):
@@ -333,7 +337,7 @@ def load_config(path: str | os.PathLike[str] | None = None) -> MaicraftConfig:
 
     文件不存在时从模板复制；存在时模板版本更高、或用户配置的版本号读不出来，就按模板
     升级一次（先备份，保留用户设置和注释）。找不到模板、校验不通过时抛
-    :class:`ConfigError`，消息是给用户看的中文说明。
+    :class:`ConfigValidationError`，消息是给用户看的中文说明。
 
     Args:
         path: 配置文件路径；不给时用运行目录下的 config.toml
@@ -348,7 +352,7 @@ def load_config(path: str | os.PathLike[str] | None = None) -> MaicraftConfig:
 
     if not config_path.exists():
         if not template.exists():
-            raise ConfigError(
+            raise ConfigValidationError(
                 f"没有找到配置模板：应该在 {template}。模板随程序一起打包，找不到通常说明安装不完整；"
                 f"请重新安装本程序，或先把一份 config.toml 放到 {config_path}，再用 --config 指定它的路径。"
             )
@@ -373,4 +377,4 @@ def load_config(path: str | os.PathLike[str] | None = None) -> MaicraftConfig:
         for error in exc.errors():
             field = ".".join(str(part) for part in error["loc"]) or "（顶层）"
             lines.append(f"- {field}：{error['msg']}")
-        raise ConfigError("\n".join(lines)) from exc
+        raise ConfigValidationError("\n".join(lines)) from exc

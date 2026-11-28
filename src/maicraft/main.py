@@ -23,7 +23,7 @@ from maicraft.agent.mod_protocol import (
 )
 from maicraft.agent.notes import Notes
 from maicraft.agent.skills import SkillCatalog
-from maicraft.config import ConfigError, MaicraftConfig, load_config
+from maicraft.config import ConfigValidationError, MaicraftConfig, load_config
 from maicraft.mod_client import ModClient, ModUnavailable
 from maicraft.openai_client.llm_request import LLMClient
 from maicraft.openai_client.modelconfig import ModelConfig
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         config = load_config(args.config)
-    except ConfigError as exc:
+    except ConfigValidationError as exc:
         # 配置无法使用（缺模板、校验不通过）：把中文说明打到标准错误，非零退出
         print(str(exc), file=sys.stderr)
         return 1

@@ -7,22 +7,22 @@
 version = "0.4.0"
 
 [logging]
-# 日志级别，可选: TRACE, DEBUG, INFO, SUCCESS, WARNING, ERROR, CRITICAL
+# 是否写日志文件
+enabled = true
+# 文件里每行是纯文本（text）还是一个 JSON 对象（jsonl）
+format = "text"
+# 日志目录，相对运行目录
+directory = "logs"
+# 写进文件的最低级别
 level = "INFO"
-# 是否启用JSON Lines格式文件输出（控制台始终为彩色格式）
-enable_json = false
-# 是否输出日志到文件
-log_to_file = true
-# 日志目录
-log_dir = "logs"
-# 日志轮转策略（如"1 day", "100 MB"）
-rotation = "1 day"
-# 日志保留策略（如"7 days", "10 files"）
+# 控制台的最低级别
+console_level = "INFO"
+# 单个文件多大时轮转
+rotation = "10 MB"
+# 轮转出的旧文件保留多久
 retention = "7 days"
-# 是否启用层次化日志记录（不同级别输出到不同文件）
-enable_hierarchical_logging = true
-# 内存中保留的最近日志条数
-max_recent_logs = 1000
+# 轮转出的旧文件的压缩格式
+compression = "zip"
 
 [llm]
 # 模型名称
