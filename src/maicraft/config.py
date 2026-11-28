@@ -7,9 +7,13 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from packaging import version
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from maicraft.utils.logger import get_logger
+
+
+class ConfigError(Exception):
+    """配置文件无法使用：找不到模板、校验不通过等，异常消息是给用户看的中文说明。"""
 
 
 class InnerConfig(BaseModel):
@@ -324,7 +328,9 @@ def _create_config_from_template(config_path: Path, template: Path) -> None:
 def load_config(path: str | os.PathLike[str] | None = None) -> MaicraftConfig:
     """加载配置并校验成 MaicraftConfig
 
-    文件不存在时从模板复制；存在时模板版本更高就升级（先备份，保留用户设置和注释）。
+    文件不存在时从模板复制；存在时模板版本更高、或用户配置的版本号读不出来，就按模板
+    升级一次（先备份，保留用户设置和注释）。找不到模板、校验不通过时抛
+    :class:`ConfigError`，消息是给用户看的中文说明。
 
     Args:
         path: 配置文件路径；不给时用运行目录下的 config.toml
@@ -338,17 +344,31 @@ def load_config(path: str | os.PathLike[str] | None = None) -> MaicraftConfig:
     template = template_path()
 
     if not config_path.exists():
+        if not template.exists():
+            raise ConfigError(
+                f"没有找到配置模板：在 {template} 找过 config-template.toml。"
+                "请在仓库目录里运行本程序；如果确实要在别的目录运行，"
+                f"请先把一份 config.toml 放到 {config_path}，或用 --config 指定它的路径。"
+            )
         logger.info("[配置加载] 未找到config.toml文件，正在创建默认配置...")
         _create_config_from_template(config_path, template)
     else:
         template_version = _get_version_from_toml(str(template))
         config_version = _get_version_from_toml(str(config_path))
-
-        if template_version and config_version and _compare_versions(template_version, config_version):
+        # 用户配置的版本号读不出来（缺 [inner]、缺 version、不是合法版本号）而模板在位时，
+        # 也按模板升级路径处理一次：备份、去掉模板里没有的段和键、补上缺的、保留用户已有的值
+        if template_version and (config_version is None or _compare_versions(template_version, config_version)):
             logger.info(f"[配置更新] 检测到模板版本更新: {config_version} -> {template_version}")
             _update_config_from_template(str(config_path), str(template))
 
     with open(config_path, "rb") as f:
         data = tomli.load(f)
 
-    return MaicraftConfig.model_validate(data)
+    try:
+        return MaicraftConfig.model_validate(data)
+    except ValidationError as exc:
+        lines = [f"配置文件校验失败：{config_path}"]
+        for error in exc.errors():
+            field = ".".join(str(part) for part in error["loc"]) or "（顶层）"
+            lines.append(f"- {field}：{error['msg']}")
+        raise ConfigError("\n".join(lines)) from exc

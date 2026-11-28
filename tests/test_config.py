@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from maicraft.config import MaicraftConfig, load_config
+from maicraft.config import ConfigError, MaicraftConfig, load_config
 
 REPO_TEMPLATE = Path(__file__).resolve().parents[1] / "config-template.toml"
 
@@ -132,3 +132,82 @@ def test_explicit_path_is_used(tmp_path):
     assert config_path.exists()
     assert config.inner.version == "0.3.0"
     assert template_dir.exists()
+
+
+def test_missing_template_reports_a_readable_error(tmp_path, monkeypatch):
+    """运行目录里没有模板又要新建配置：给出中文说明（找过哪里、该怎么办），不抛原始回溯。"""
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ConfigError) as excinfo:
+        load_config()
+
+    message = str(excinfo.value)
+    assert "config-template.toml" in message
+    assert str(tmp_path) in message, "写明在哪个目录找过模板"
+    assert "仓库目录" in message
+    assert "config.toml" in message
+
+
+def test_upgrade_runs_when_user_version_is_unreadable(template_dir):
+    """用户配置缺 [inner] 或版本号不合法而模板在位：按现有升级路径处理一次。"""
+    for version_line in ('[inner]\nversion = "not-a-version"\n', ""):
+        old_config = (
+            version_line
+            + """\
+[bot]
+player_name = "Mai"
+
+[llm]
+model = "gpt-4o"
+api_key = "sk-user-key"
+temperature = 0.7
+
+[logging]
+level = "DEBUG"
+"""
+        )
+        (template_dir / "config.toml").write_text(old_config, encoding="utf-8")
+
+        config = load_config()
+
+        assert isinstance(config, MaicraftConfig)
+        assert (template_dir / "config.toml.backup").exists(), "升级前留备份"
+        text = (template_dir / "config.toml").read_text(encoding="utf-8")
+        assert "[bot]" not in text, "模板里没有的段被去掉"
+        assert config.inner.version == "0.3.0"
+        assert config.llm.model == "gpt-4o"
+        assert config.llm.api_key == "sk-user-key"
+        assert config.llm.temperature == 0.7
+        assert config.logging.level == "DEBUG"
+        assert (template_dir / "config.toml.backup").exists()
+        (template_dir / "config.toml.backup").unlink()
+
+
+def test_validation_failure_lists_each_bad_field(template_dir):
+    """最终校验失败：报中文错误，写明配置文件路径和每一个出问题的字段，每条一行。"""
+    text = (REPO_TEMPLATE).read_text(encoding="utf-8")
+    bad_config = text.replace("temperature = 0.2", "temperature = 5.0").replace("max_tokens = 4096", "max_tokens = 1")
+    (template_dir / "config.toml").write_text(bad_config, encoding="utf-8")
+
+    with pytest.raises(ConfigError) as excinfo:
+        load_config()
+
+    message = str(excinfo.value)
+    assert str(template_dir / "config.toml") in message
+    assert "llm.temperature" in message
+    assert "llm.max_tokens" in message
+    lines = [line for line in message.splitlines() if line.startswith("- ")]
+    assert len(lines) == 2, "每个出问题的字段各占一行"
+
+
+def test_main_prints_chinese_config_error_and_exits_nonzero(tmp_path, monkeypatch, capsys):
+    """main 层面：配置无法使用时把中文说明打到标准错误，非零退出码。"""
+    monkeypatch.chdir(tmp_path)
+
+    from maicraft.main import main
+
+    assert main([]) == 1
+
+    err = capsys.readouterr().err
+    assert "config-template.toml" in err
+    assert "仓库目录" in err
