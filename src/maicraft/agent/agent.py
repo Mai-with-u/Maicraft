@@ -363,11 +363,16 @@ class Agent:
         return now >= self._last_turn_end_s + agent_config.idle_replan_minutes * 60
 
     def _wait_timeout(self, now: float) -> float | None:
-        """还要等多久：公屏下一批到点、重叫醒时刻、模型服务重试时刻、空闲到点，取最近；没有就是 None。"""
+        """还要等多久：公屏下一批到点、重叫醒时刻、模型服务重试时刻、空闲到点，取最近；没有就是 None。
+
+        模型服务不可用（fatal）时不计公屏候选：这一期间不取批，到点时刻恒为 0 会让等待
+        空转；fatal 重试时刻已在候选里，重试那一轮会通过 take_due 带上积压的批。
+        """
         candidates: list[float] = []
-        chat_delay_ms = self._chat_filter.next_wake_delay_ms()
-        if chat_delay_ms is not None:
-            candidates.append(max(0.0, chat_delay_ms / 1000))
+        if self._fatal_retry_at_s is None:
+            chat_delay_ms = self._chat_filter.next_wake_delay_ms()
+            if chat_delay_ms is not None:
+                candidates.append(max(0.0, chat_delay_ms / 1000))
         if self._pending_replay and self._replay_at_s is not None:
             candidates.append(max(0.0, self._replay_at_s - now))
         if self._fatal_retry_at_s is not None:

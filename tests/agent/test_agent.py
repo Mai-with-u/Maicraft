@@ -68,6 +68,7 @@ class Harness:
         call: Callable[[str, dict[str, Any]], Awaitable[Any]] | None = None,
     ) -> None:
         self.clock = ManualClock()
+        self.sleep_calls: list[float] = []
         self.mod = mod or FakeMod(clock=self.clock)
         self.llm = llm or ScriptedLLM()
         self.config = config or make_config()
@@ -81,6 +82,7 @@ class Harness:
         self._call = call
 
         async def sleep(seconds: float) -> None:
+            self.sleep_calls.append(seconds)
             self.clock.advance(seconds)
             await asyncio.sleep(0)
 
@@ -345,6 +347,38 @@ async def test_fatal_failure_stops_model_calls_until_hourly_retry(tmp_path: Path
         harness.clock.advance(7200)
         await pump()
         assert harness.llm.call_count == count
+    finally:
+        await harness.stop()
+
+
+async def test_fatal_wait_does_not_spin_on_a_due_chat_batch(tmp_path: Path) -> None:
+    """模型服务持续失败后的等待期，已到点的公屏批不再把等待超时算成 0 而空转。
+
+    公屏点名批先到点、随后那一轮模型调用 fatal：修复前等待把到点的批当成 0 超时候选，
+    虚拟时间推不进、到不了每小时的重试时刻，主循环一直空转；修复后到重试时刻的那一轮
+    通过 take_due 把积压的批带上交给模型，内容不丢。
+    """
+    harness = Harness(tmp_path)
+    harness.start()
+    try:
+        await until(lambda: harness.llm.call_count >= 1)
+        await pump(20)
+        # 公屏点名进入筛选器，合批窗口还没到点（不会在下一轮开始时被取走）
+        chat_message(harness.mod, "Steve", "Mai 过来一下")
+        await until(lambda: harness.agent._chat_filter.next_wake_delay_ms() is not None)
+        # 随后叫醒的那一轮模型调用 fatal，进入每小时重试的等待期；点名批在这一轮期间到点、
+        # 整个等待期都积压在筛选器里
+        harness.llm.steps.append(llm_failure("fatal", "鉴权失败"))
+        harness.mod.body_event("timer_due", "计时到点")
+        await until(lambda: harness.llm.call_count >= 2)
+        await pump(20)
+        await until(lambda: harness.llm.call_count >= 3, tries=2000)
+        joined = all_user_text(harness.llm, start=2)
+        assert "上一次调用模型服务失败" in joined
+        assert "Mai 过来一下" in joined
+        # 覆盖了整个 fatal 等待期（约一小时虚拟时间）：空转的特征是等待超时恒为 0、
+        # 反复 0 延迟地睡醒，正常退避与空页补等都是正延迟，0 延迟的 sleep 一次都不该有
+        assert [s for s in harness.sleep_calls if s == 0] == []
     finally:
         await harness.stop()
 
