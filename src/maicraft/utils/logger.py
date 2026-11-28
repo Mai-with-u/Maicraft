@@ -76,7 +76,6 @@ def configure_from_config(config_dict: dict[str, Any] | None = None) -> None:
         return
 
     directory = Path(config.get("directory", "logs"))
-    directory.mkdir(parents=True, exist_ok=True)
     common = {
         "level": config.get("level", "INFO"),
         "rotation": config.get("rotation", "10 MB"),
@@ -84,18 +83,28 @@ def configure_from_config(config_dict: dict[str, Any] | None = None) -> None:
         "compression": config.get("compression", "zip"),
         "encoding": "utf-8",
     }
-    if config.get("format", "text") == "jsonl":
-        file_handler = loguru_logger.add(
-            directory / "maicraft_{time}.log",
-            format=_jsonl_formatter,
-            **common,
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        if config.get("format", "text") == "jsonl":
+            file_handler = loguru_logger.add(
+                directory / "maicraft_{time}.log",
+                format=_jsonl_formatter,
+                **common,
+            )
+        else:
+            file_handler = loguru_logger.add(
+                directory / "maicraft_{time}.log",
+                format=_TEXT_FORMAT,
+                **common,
+            )
+    except OSError as exc:
+        # 常驻程序不因日志写不了而退出：降级为只有控制台输出，并说明原因
+        loguru_logger.bind(module="logging").warning(
+            "日志目录 {path} 建不了或文件输出挂不上（{reason}），本次只输出到控制台",
+            path=str(directory),
+            reason=exc,
         )
-    else:
-        file_handler = loguru_logger.add(
-            directory / "maicraft_{time}.log",
-            format=_TEXT_FORMAT,
-            **common,
-        )
+        return
     _handler_ids.append(file_handler)
 
 

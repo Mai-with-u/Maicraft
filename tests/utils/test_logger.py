@@ -1,6 +1,8 @@
 """日志模块的行为测试：文件全部写到 tmp_path，不 sleep、不联网。"""
 
 import json
+import subprocess
+import sys
 
 import pytest
 
@@ -20,13 +22,70 @@ def _read_lines(directory):
     return files[-1].read_text(encoding="utf-8").splitlines()
 
 
-def test_unconfigured_use_creates_nothing(tmp_path, monkeypatch):
-    """没配置过就取用并记日志：运行目录不建 logs/，也不出现任何新文件。"""
-    monkeypatch.chdir(tmp_path)
-    get_logger("FreshModule").info("默认初始化不写文件")
+def test_unconfigured_use_creates_nothing(tmp_path):
+    """从没配置过的进程里取用并记日志：运行目录不建 logs/，也不出现任何新文件。
 
+    本测试进程在 conftest 里已经配置过日志，所以用子进程模拟真正的"未配置"状态。
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", "from maicraft.utils.logger import get_logger; get_logger('x').info('hi')"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    assert "hi" in result.stderr
     assert not (tmp_path / "logs").exists()
     assert not list(tmp_path.iterdir()), "运行目录里不应出现任何新文件"
+
+
+def test_unwritable_directory_falls_back_to_console(tmp_path, capsys):
+    """日志目录建不出来时不抛异常：退回只输出控制台，并记一条警告说明原因。"""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("占位文件", encoding="utf-8")
+    configure_from_config({"enabled": True, "directory": str(blocker / "sub")})
+
+    get_logger("FallbackModule").info("仍然要能输出")
+
+    err = capsys.readouterr().err
+    assert "仍然要能输出" in err
+    assert "只输出到控制台" in err
+    assert not (blocker / "sub").exists()
+
+
+def test_exc_with_exception_object_records_traceback(tmp_path):
+    """exc 直接传异常对象时，文本日志里带该异常的堆栈。"""
+    log_dir = tmp_path / "logdir"
+    configure_from_config({"enabled": True, "format": "text", "directory": str(log_dir)})
+    error = KeyError("缺少键")
+
+    get_logger("ExcObjectModule").error("参数不对", exc=error)
+
+    text = "\n".join(_read_lines(log_dir))
+    assert "参数不对" in text and "KeyError" in text and "缺少键" in text
+
+
+def test_jsonl_message_with_newline_stays_one_line(tmp_path):
+    """jsonl 格式下消息里的换行被转义，每条日志仍占一行。"""
+    log_dir = tmp_path / "logdir"
+    configure_from_config({"enabled": True, "format": "jsonl", "directory": str(log_dir)})
+
+    get_logger("NewlineModule").info("第一行\n第二行")
+
+    lines = _read_lines(log_dir)
+    assert len(lines) == 1
+    assert json.loads(lines[0])["message"] == "第一行\n第二行"
+
+
+def test_disabled_log_does_not_create_directory(tmp_path):
+    """enabled=False 时即使显式给了 directory 也不建目录。"""
+    log_dir = tmp_path / "never"
+    configure_from_config({"enabled": False, "directory": str(log_dir)})
+
+    get_logger("DisabledModule").info("不落盘")
+
+    assert not log_dir.exists()
 
 
 def test_enabled_writes_text_file_with_expected_format(tmp_path):
