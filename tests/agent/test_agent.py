@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from maicraft.agent.agent import Agent
-from maicraft.agent.mod_protocol import reply_of
+from maicraft.agent.mod_protocol import LOOKUP, reply_of
 from maicraft.agent.notes import Notes
 from maicraft.config import MaicraftConfig
 from maicraft.mod_client import ModUnavailable
@@ -639,14 +639,27 @@ async def test_idle_wake_fires_while_goal_paused(tmp_path: Path) -> None:
 
 
 async def test_world_switch_rebuild_failing_midway_does_not_kill_agent(tmp_path: Path) -> None:
-    """换存档后重建开局资料的四次 mod 调用中途断线：agent 不退出，重连后按新存档重建并跑轮。"""
+    """换存档后重建开局资料的四次 mod 调用中途断线：agent 不退出，重连后按新存档重建并跑轮。
+
+    断线要真的落在 ``_build_opening_material`` 的调用上，而不是它之前的每轮资料
+    （``_turn_material`` 只调 observe(self) 和 goal(list)，没有 lookup），否则这条回归测试
+    在"重建块不在 try 里"的旧代码上也能通过。做法：换存档后布防，假件见到布防后的
+    第一个 lookup（开局资料的第 3 次调用）起抛 ``ModUnavailable``，恢复前一直断着；
+    断线时挂起一小段虚拟时间再失败，让重连环不独占事件循环。
+    """
     clock = ManualClock()
     mod = FakeMod(clock=clock)
-    down = {"flag": False}
+    armed = {"flag": False}
+    fail_on_lookup = {"flag": False}
 
     async def call(name: str, arguments: dict[str, Any]) -> Any:
-        if down["flag"]:
-            # 断线：连接层的每一次调用都失败（重建开局资料的第二阶段正好落在断线窗口里）
+        if armed["flag"] and name == LOOKUP:
+            fail_on_lookup["flag"] = True  # 布防后第一次 lookup 就是开局资料里那次
+        if fail_on_lookup["flag"]:
+            # 断线：挂起再失败，重连环里等在别处的任务能被调度到
+            await asyncio.sleep(0)
+            clock.advance(0.1)
+            await asyncio.sleep(0)
             raise ModUnavailable("重建开局资料时断了")
         return reply_of(await mod.invoke(name, arguments))
 
@@ -663,25 +676,31 @@ async def test_world_switch_rebuild_failing_midway_does_not_kill_agent(tmp_path:
         mod.enter_world("aaaaaaaa-1111")
         await until(lambda: harness.notes.world_id == "aaaaaaaa-1111")
         await pump(30)
-        # 换存档，重建开局资料的中途断线：agent 不退出、不调模型、断线被记下
-        down["flag"] = True
+        # 布防后布防轮的每轮资料（observe self、goal list）先成功，
+        # 布防后第一次 lookup（重建开局资料里那次）起断线，抛进重建块；恢复前一直断着
+        armed["flag"] = True
         calls_before = harness.llm.call_count
         mod.change_world()
         mod.enter_world("bbbbbbbb-2222")
-        await pump(60)
+        await pump(120)
+        assert fail_on_lookup["flag"]  # 断线确实落在了开局资料的 lookup 上
         assert harness.llm.call_count == calls_before  # 没去调模型
-        assert not harness.agent._connected
-        assert harness.agent._need_opening  # 重连后还要重建
+        assert harness.agent._need_opening  # 重建没完成，重连后还要重建
         # 重连：开局资料按新存档重建，之后正常跑这一轮
-        down["flag"] = False
-        harness.llm.steps.append(llm_text())
-        await until(lambda: harness.llm.call_count >= calls_before + 1)
+        armed["flag"] = False
+        fail_on_lookup["flag"] = False
+        for _ in range(2000):
+            await asyncio.sleep(0)
+            if harness.llm.call_count >= calls_before + 1:
+                break
+        assert harness.llm.call_count >= calls_before + 1
         opening = next(
             str(m.get("content"))
             for m in harness.llm.calls[-1]
             if m.get("role") == "user" and "以下是程序代为读取的开局资料" in str(m.get("content"))
         )
         assert "bbbbbbbb-2222" in opening
+        assert "砍木头" not in opening
         assert not harness.agent._need_opening
     finally:
         await harness.stop()
