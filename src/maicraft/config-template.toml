@@ -1,7 +1,10 @@
 # Maicraft配置模板
-[inner]
-# 配置格式的版本，只用来和模板比较，不要手动改
-version = "0.3.0"
+
+# 文件元数据
+
+[meta]
+# 配置结构版本（只读，由升级流程自动推进）
+version = "0.4.0"
 
 [logging]
 # 日志级别，可选: TRACE, DEBUG, INFO, SUCCESS, WARNING, ERROR, CRITICAL

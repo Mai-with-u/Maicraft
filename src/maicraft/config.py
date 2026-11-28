@@ -3,6 +3,7 @@
 import os
 import shutil
 import tomllib as tomli
+from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -16,12 +17,12 @@ class ConfigError(Exception):
     """配置文件无法使用：找不到模板、校验不通过等，异常消息是给用户看的中文说明。"""
 
 
-class InnerConfig(BaseModel):
+class MetaConfig(BaseModel):
     """配置文件格式版本，只用来和模板比较"""
 
     model_config = ConfigDict(extra="forbid")
 
-    version: str = Field(default="0.3.0", description="配置格式的版本，只用来和模板比较")
+    version: str = Field(default="0.4.0", description="配置格式的版本，只用来和模板比较")
 
 
 class LoggingConfig(BaseModel):
@@ -103,7 +104,7 @@ class MaicraftConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    inner: InnerConfig = Field(default_factory=InnerConfig, description="配置格式版本")
+    meta: MetaConfig = Field(default_factory=MetaConfig, description="配置格式版本")
     logging: LoggingConfig = Field(default_factory=LoggingConfig, description="Logging配置")
     llm: LLMConfig = Field(default_factory=LLMConfig, description="LLM配置")
     mod: ModConfig = Field(default_factory=ModConfig, description="mod连接配置")
@@ -113,8 +114,10 @@ class MaicraftConfig(BaseModel):
 
 
 def template_path() -> Path:
-    """运行目录下的 config-template.toml"""
-    return Path.cwd() / "config-template.toml"
+    """包内自带的配置模板；装成 wheel 之后也在包里"""
+    traversable = files("maicraft").joinpath("config-template.toml")
+    with as_file(traversable) as path:
+        return path
 
 
 def _get_version_from_toml(toml_path: str) -> Optional[str]:
@@ -122,7 +125,7 @@ def _get_version_from_toml(toml_path: str) -> Optional[str]:
     try:
         with open(toml_path, "rb") as f:
             data = tomli.load(f)
-        return data.get("inner", {}).get("version")
+        return data.get("meta", {}).get("version")
     except Exception:
         return None
 
@@ -183,7 +186,7 @@ def _update_config_from_template(config_path: str, template_path_str: str) -> No
                         and key in existing_data[section]
                         and existing_data[section][key] != template_value
                         and not (key == "api_key" and existing_data[section][key] == "your-api-key")
-                        and not (section == "inner" and key == "version")
+                        and not (section == "meta" and key == "version")
                     ):
                         merged_data[section][key] = existing_data[section][key]
                         logger.info(f"[配置更新] 保留用户设置: {section}.{key} = {existing_data[section][key]}")
@@ -346,9 +349,8 @@ def load_config(path: str | os.PathLike[str] | None = None) -> MaicraftConfig:
     if not config_path.exists():
         if not template.exists():
             raise ConfigError(
-                f"没有找到配置模板：在 {template} 找过 config-template.toml。"
-                "请在仓库目录里运行本程序；如果确实要在别的目录运行，"
-                f"请先把一份 config.toml 放到 {config_path}，或用 --config 指定它的路径。"
+                f"没有找到配置模板：应该在 {template}。模板随程序一起打包，找不到通常说明安装不完整；"
+                f"请重新安装本程序，或先把一份 config.toml 放到 {config_path}，再用 --config 指定它的路径。"
             )
         logger.info("[配置加载] 未找到config.toml文件，正在创建默认配置...")
         _create_config_from_template(config_path, template)

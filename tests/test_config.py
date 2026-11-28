@@ -1,21 +1,20 @@
 """配置模型与配置文件加载测试，全部在临时目录里进行。"""
 
-import shutil
 import tomllib
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+import maicraft.config
 from maicraft.config import ConfigError, MaicraftConfig, load_config
 
-REPO_TEMPLATE = Path(__file__).resolve().parents[1] / "config-template.toml"
+PACKAGE_TEMPLATE = Path(__file__).resolve().parents[1] / "src" / "maicraft" / "config-template.toml"
 
 
 @pytest.fixture
 def template_dir(tmp_path, monkeypatch):
-    """临时运行目录，里面放了新版模板，并把工作目录切过去。"""
-    shutil.copy2(REPO_TEMPLATE, tmp_path / "config-template.toml")
+    """临时运行目录：模板从包里取，工作目录切过去。"""
     monkeypatch.chdir(tmp_path)
     return tmp_path
 
@@ -23,7 +22,7 @@ def template_dir(tmp_path, monkeypatch):
 def test_defaults_from_template(template_dir):
     config = load_config()
 
-    assert config.inner.version == "0.3.0"
+    assert config.meta.version == "0.4.0"
     assert config.llm.model == "gpt-4o-mini"
     assert config.llm.api_key == ""
     assert config.llm.temperature == 0.2
@@ -106,12 +105,12 @@ level = "DEBUG"
     assert config.llm.temperature == 0.7
     assert config.llm.max_tokens == 1024
     assert config.logging.level == "DEBUG"
-    assert config.inner.version == "0.3.0"
-    assert data["inner"]["version"] == "0.3.0"
+    assert config.meta.version == "0.4.0"
+    assert data["meta"]["version"] == "0.4.0"
 
 
 def test_no_upgrade_when_template_version_not_higher(template_dir):
-    config_text = (REPO_TEMPLATE).read_text(encoding="utf-8")
+    config_text = PACKAGE_TEMPLATE.read_text(encoding="utf-8")
     (template_dir / "config.toml").write_text(config_text, encoding="utf-8")
     before = (template_dir / "config.toml").stat().st_mtime_ns
 
@@ -122,29 +121,25 @@ def test_no_upgrade_when_template_version_not_higher(template_dir):
 
 
 def test_explicit_path_is_used(tmp_path):
-    template_dir = tmp_path / "run"
-    template_dir.mkdir()
-    shutil.copy2(REPO_TEMPLATE, template_dir / "config-template.toml")
     config_path = tmp_path / "elsewhere" / "my-config.toml"
 
     config = load_config(config_path)
 
     assert config_path.exists()
-    assert config.inner.version == "0.3.0"
-    assert template_dir.exists()
+    assert config.meta.version == "0.4.0"
 
 
 def test_missing_template_reports_a_readable_error(tmp_path, monkeypatch):
-    """运行目录里没有模板又要新建配置：给出中文说明（找过哪里、该怎么办），不抛原始回溯。"""
-    monkeypatch.chdir(tmp_path)
+    """模板不在位又要新建配置：给出中文说明（该在哪、该怎么办），不抛原始回溯。"""
+    fake_template = tmp_path / "no-such" / "config-template.toml"
+    monkeypatch.setattr(maicraft.config, "template_path", lambda: fake_template)
 
     with pytest.raises(ConfigError) as excinfo:
         load_config()
 
     message = str(excinfo.value)
     assert "config-template.toml" in message
-    assert str(tmp_path) in message, "写明在哪个目录找过模板"
-    assert "仓库目录" in message
+    assert str(fake_template) in message, "写明模板应该在哪个位置"
     assert "config.toml" in message
 
 
@@ -174,7 +169,7 @@ level = "DEBUG"
         assert (template_dir / "config.toml.backup").exists(), "升级前留备份"
         text = (template_dir / "config.toml").read_text(encoding="utf-8")
         assert "[bot]" not in text, "模板里没有的段被去掉"
-        assert config.inner.version == "0.3.0"
+        assert config.meta.version == "0.4.0"
         assert config.llm.model == "gpt-4o"
         assert config.llm.api_key == "sk-user-key"
         assert config.llm.temperature == 0.7
@@ -185,7 +180,7 @@ level = "DEBUG"
 
 def test_validation_failure_lists_each_bad_field(template_dir):
     """最终校验失败：报中文错误，写明配置文件路径和每一个出问题的字段，每条一行。"""
-    text = (REPO_TEMPLATE).read_text(encoding="utf-8")
+    text = PACKAGE_TEMPLATE.read_text(encoding="utf-8")
     bad_config = text.replace("temperature = 0.2", "temperature = 5.0").replace("max_tokens = 4096", "max_tokens = 1")
     (template_dir / "config.toml").write_text(bad_config, encoding="utf-8")
 
@@ -203,6 +198,7 @@ def test_validation_failure_lists_each_bad_field(template_dir):
 def test_main_prints_chinese_config_error_and_exits_nonzero(tmp_path, monkeypatch, capsys):
     """main 层面：配置无法使用时把中文说明打到标准错误，非零退出码。"""
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(maicraft.config, "template_path", lambda: tmp_path / "no-such" / "config-template.toml")
 
     from maicraft.main import main
 
@@ -210,4 +206,3 @@ def test_main_prints_chinese_config_error_and_exits_nonzero(tmp_path, monkeypatc
 
     err = capsys.readouterr().err
     assert "config-template.toml" in err
-    assert "仓库目录" in err
