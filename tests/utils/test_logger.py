@@ -1,6 +1,7 @@
 """日志模块的行为测试：文件全部写到 tmp_path，不 sleep、不联网。"""
 
 import json
+import re
 import subprocess
 import sys
 
@@ -38,6 +39,27 @@ def test_unconfigured_use_creates_nothing(tmp_path):
     assert "hi" in result.stderr
     assert not (tmp_path / "logs").exists()
     assert not list(tmp_path.iterdir()), "运行目录里不应出现任何新文件"
+
+
+def test_unconfigured_use_outputs_each_message_once(tmp_path):
+    """未配置进程里取用并记一条日志：标准错误里恰好一行，且是约定的行格式。"""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from maicraft.utils.logger import get_logger; get_logger('OnceModule').info('hello-once')",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=True,
+    )
+    ansi_pattern = re.compile(r"\x1b\[[0-9;]*m")
+    plain_lines = [ansi_pattern.sub("", line) for line in result.stderr.splitlines()]
+    matched = [line for line in plain_lines if "hello-once" in line]
+    assert len(matched) == 1, f"应只输出一行，实际：{result.stderr!r}"
+    assert "| INFO     | OnceModule - hello-once" in matched[0]
 
 
 def test_unwritable_directory_falls_back_to_console(tmp_path, capsys):

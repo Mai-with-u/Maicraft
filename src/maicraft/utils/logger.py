@@ -146,6 +146,8 @@ class ModuleLogger:
 def get_logger(module_name: str) -> ModuleLogger:
     """取绑定模块名的日志入口；未配置过时保证有一个默认控制台输出。"""
     if not _configured and not _handler_ids:
+        # 先摘掉 loguru 导入时自带的默认处理器，避免同一条日志输出两遍、两种格式
+        loguru_logger.remove()
         _handler_ids.append(
             loguru_logger.add(
                 sys.stderr,
