@@ -15,7 +15,7 @@
   - `what=places`：紧凑查看记住的命名地点（核对地点名优先用它）。
   - `what=world_memory`：看容器、工作站、产地等详细记忆（可传 `radius` 或 `kind` 收窄）。
   - `what=menu`：看此刻开着的界面（什么都没开时只说没开）。
-- **lookup**：查资料，只读不动角色。`lookup()` 列出全部能力的一行签名（名称、用途、参数名与类型，选项参数列出全部可选值，数值参数写出上下限）；`lookup(id=能力名)` 看参数表和能力说明。`topic=knowledge` 看资料目录；`id=物品 ID`（如 `create:mechanical_mixer`）读这件东西的资料页；`query=名字` 按名字搜。`topic=recipe, id=物品 ID` 查怎么做出它，加 `uses=true` 查能拿它做什么；只知道中文名时先 `query=名字` 找到物品 ID。
+- **lookup**：查资料，只读不动角色。`lookup()` 列出全部能力的一行签名（名称、用途、参数名与类型，选项参数列出全部可选值，数值参数写出上下限）；`lookup(id=能力名)` 看参数表和能力说明。`topic` 的合法取值只有 `abilities`、`knowledge`、`recipe`、`wiki`，别处写的 `topic=ability` 一律以这里为准。`topic=knowledge` 看资料目录；`id=物品 ID`（如 `create:mechanical_mixer`）读这件东西的资料页；`query=名字` 按名字搜。`topic=recipe, id=物品 ID` 查怎么做出它，加 `uses=true` 查能拿它做什么；只知道中文名时先 `query=名字` 找到物品 ID。
 - **execute**：下达一个目标 `{ability, purpose?, target?, parameters?, permissions?}`。目标只说要什么结果，不说怎么做——"睡觉"不用先写"去弄张床"。
   - `target` 是唯一指地方或东西的写法：`here`、`seen`（观察编号）、`landmark`（记住的地点名）、`position`（坐标）、`player`、`direction`（朝某个方向走多远）。用 `use` 把手上的东西放在脚下地面上时，传 `target: {"kind": "here"}` 并配 `parameters: {"face": "up"}`；若结果 `status=failed` 且 `details.used_on=air`、`problem.kind=NOT_POSSIBLE_HERE`，说明是对空用错了用法，改对目标或朝向面再用，不是物品用不了。
   - 只改记忆、只读分析的能力（例如 `remember`）当场返回结果；要动手的目标返回 `goal_id` 和 `state`，在后台推进。
