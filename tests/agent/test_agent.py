@@ -636,3 +636,52 @@ async def test_idle_wake_fires_while_goal_paused(tmp_path: Path) -> None:
         assert "你已经空闲 1 分钟" in user_text(harness.llm.calls[3])
     finally:
         await harness.stop()
+
+
+async def test_world_switch_rebuild_failing_midway_does_not_kill_agent(tmp_path: Path) -> None:
+    """换存档后重建开局资料的四次 mod 调用中途断线：agent 不退出，重连后按新存档重建并跑轮。"""
+    clock = ManualClock()
+    mod = FakeMod(clock=clock)
+    down = {"flag": False}
+
+    async def call(name: str, arguments: dict[str, Any]) -> Any:
+        if down["flag"]:
+            # 断线：连接层的每一次调用都失败（重建开局资料的第二阶段正好落在断线窗口里）
+            raise ModUnavailable("重建开局资料时断了")
+        return reply_of(await mod.invoke(name, arguments))
+
+    harness = Harness(tmp_path, mod=mod, call=call)
+    harness.llm.steps.append(
+        llm_tool_call("execute", {"goal": {"ability": "gather", "purpose": "砍木头"}}, "call-exec")
+    )
+    harness.llm.steps.append(llm_text())
+    harness.start()
+    try:
+        await until(lambda: harness.llm.call_count >= 2)
+        await pump(30)
+        # 进第一个存档并留一个在跑的目标，然后换存档：旧目标全没了
+        mod.enter_world("aaaaaaaa-1111")
+        await until(lambda: harness.notes.world_id == "aaaaaaaa-1111")
+        await pump(30)
+        # 换存档，重建开局资料的中途断线：agent 不退出、不调模型、断线被记下
+        down["flag"] = True
+        calls_before = harness.llm.call_count
+        mod.change_world()
+        mod.enter_world("bbbbbbbb-2222")
+        await pump(60)
+        assert harness.llm.call_count == calls_before  # 没去调模型
+        assert not harness.agent._connected
+        assert harness.agent._need_opening  # 重连后还要重建
+        # 重连：开局资料按新存档重建，之后正常跑这一轮
+        down["flag"] = False
+        harness.llm.steps.append(llm_text())
+        await until(lambda: harness.llm.call_count >= calls_before + 1)
+        opening = next(
+            str(m.get("content"))
+            for m in harness.llm.calls[-1]
+            if m.get("role") == "user" and "以下是程序代为读取的开局资料" in str(m.get("content"))
+        )
+        assert "bbbbbbbb-2222" in opening
+        assert not harness.agent._need_opening
+    finally:
+        await harness.stop()

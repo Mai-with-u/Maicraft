@@ -397,13 +397,13 @@ class Agent:
         self._store.clear()
         try:
             turn_material = await self._turn_material()
+            if self._need_opening:
+                # 换存档后重建一次：旧存档的开局资料不再发给模型
+                self._opening_material = await self._build_opening_material()
+                self._need_opening = False
         except ModUnavailable:
             self._mark_disconnected()
             return
-        if self._need_opening:
-            # 换存档后重建一次：旧存档的开局资料不再发给模型
-            self._opening_material = await self._build_opening_material()
-            self._need_opening = False
         wake_contents = self._turn_wake_contents
         if source == WakeSource.STARTUP and not wake_contents:
             # 连上后的第一轮：队列里已经攒下的内容一并带上
