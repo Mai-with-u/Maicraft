@@ -116,6 +116,11 @@ class Agent:
         clock: Callable[[], float] | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
+        """组装常驻主循环。
+
+        默认时钟取事件循环的时刻（``_loop_time_s``），因此构造要在运行中的事件循环里做，
+        在循环外构造会 RuntimeError；注入 ``clock`` 则不受此限制。
+        """
         self._config = config
         self._llm = llm
         self._raw_call = call
