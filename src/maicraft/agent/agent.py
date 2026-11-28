@@ -172,6 +172,8 @@ class Agent:
         self._replay_delay_s = REPLAY_BASE_DELAY_S
         # 模型服务不可用（fatal）：到了这个时刻就再试一次模型调用
         self._fatal_retry_at_s: float | None = None
+        # 连接重试退避的档位：探测失败与"探测成功、准备失败"共用，准备成功后归零
+        self._connect_failures = 0
 
     # ----- 运行 -----
 
@@ -197,7 +199,13 @@ class Agent:
                 await self._connect()
                 await self._prepare_connection()
                 if not self._connected:
+                    # 探测成功但准备失败：按同一序列退避后再试，不让"探测→准备失败"无间隔空转
+                    delay = CONNECT_RETRY_DELAYS_S[min(self._connect_failures, len(CONNECT_RETRY_DELAYS_S) - 1)]
+                    self._connect_failures += 1
+                    logger.info(f"连接准备没有完成，{delay} 秒后重试")
+                    await self._sleep(delay)
                     continue
+                self._connect_failures = 0
                 await self._run_turn(WakeSource.STARTUP)
                 continue
             source = await self._wait_for_work()
@@ -206,8 +214,11 @@ class Agent:
             await self._run_turn(source)
 
     async def _connect(self) -> None:
-        """连上 mod 为止：探测性地读一次自己，失败按 1、2、5、10、30 秒放慢重试。"""
-        failures = 0
+        """连上 mod 为止：探测性地读一次自己，失败按 1、2、5、10、30 秒放慢重试。
+
+        退避计数在 ``_main_loop`` 里：探测成功但准备失败的下一次重试也按同一序列放慢，
+        准备成功后归零。
+        """
         while True:
             reply = await self._probe()
             if reply is not None:
@@ -219,8 +230,8 @@ class Agent:
                 self._need_opening = True
                 logger.info("已连上 MaiCraftMod")
                 return
-            delay = CONNECT_RETRY_DELAYS_S[min(failures, len(CONNECT_RETRY_DELAYS_S) - 1)]
-            failures += 1
+            delay = CONNECT_RETRY_DELAYS_S[min(self._connect_failures, len(CONNECT_RETRY_DELAYS_S) - 1)]
+            self._connect_failures += 1
             logger.info(f"还没连上 MaiCraftMod，{delay} 秒后重试")
             await self._sleep(delay)
 

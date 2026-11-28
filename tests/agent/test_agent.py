@@ -412,6 +412,36 @@ async def test_reenter_world_whole_new_stream_page_wakes_model_once(tmp_path: Pa
         await harness.stop()
 
 
+async def test_prepare_failure_backs_off_between_reconnects(tmp_path: Path) -> None:
+    """探测成功但准备阶段持续失败时，重连之间按 1、2、5、10、30 秒的序列退避，不再无间隔空转。"""
+    clock = ManualClock()
+    mod = FakeMod(clock=clock)
+    lookup_fail = {"flag": True}
+    lookup_calls = {"count": 0}
+
+    async def call(name: str, arguments: dict[str, Any]) -> Any:
+        if name == LOOKUP and lookup_fail["flag"]:
+            # 探测用的 observe(self) 一直成功，只有准备阶段的 lookup 断线
+            await asyncio.sleep(0)
+            lookup_calls["count"] += 1
+            raise ModUnavailable("准备阶段断了")
+        return reply_of(await mod.invoke(name, arguments))
+
+    harness = Harness(tmp_path, mod=mod, call=call)
+    harness.start()
+    try:
+        t0 = harness.clock.now
+        # 推进 60 秒虚拟时间：按序列退避最多 6 次尝试（1+2+5+10+30+30 = 78 秒才第 7 次）
+        await until(lambda: harness.clock.now >= t0 + 60, tries=20000)
+        assert lookup_calls["count"] <= 6
+        # 撤掉故障后，在退避间隔之内恢复连接并跑这一轮
+        lookup_fail["flag"] = False
+        await until(lambda: harness.llm.call_count >= 1, tries=20000)
+        assert harness.agent._connect_failures == 0
+    finally:
+        await harness.stop()
+
+
 async def test_invalid_failure_ends_turn_without_retry(tmp_path: Path) -> None:
     harness = Harness(tmp_path)
     harness.llm.steps.append(llm_failure("invalid", "参数被拒"))
