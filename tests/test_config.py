@@ -275,6 +275,7 @@ def test_explicit_path_is_used(tmp_path):
 
 def test_missing_template_reports_a_readable_error(tmp_path, monkeypatch):
     """模板不在位又要新建配置：给出中文说明（该在哪、该怎么办），不抛原始回溯。"""
+    monkeypatch.chdir(tmp_path)
     fake_template = tmp_path / "no-such" / "config-template.toml"
     monkeypatch.setattr(maicraft.config, "template_path", lambda: fake_template)
 
